@@ -1,37 +1,69 @@
-# Desafio de Visualização de Dados (D3.js) - SVDC
+# SVDC - Visualization Exercise
 
-Este repositório contém o projeto individual desenvolvido para o **Visualization Challenge**, focado na criação de uma visualização interativa utilizando a biblioteca **D3.js**.
+**Mestrado em Inteligência Artificial | Universidade do Minho**  
 
-## 📊 Sobre os Dados
-*Identifique aqui qual dos 3 datasets escolheu.*
+## 📌 Introdução
+O propósito deste exercício é aplicar os conceitos e técnicas lecionados na unidade curricular a um dataset do mundo real. O objetivo é realizar uma análise exploratória dos dados e criar visualizações para comunicar descobertas de forma eficaz, revelando padrões que possam informar a tomada de decisão.
 
-* **Fonte:** [Nome da Fonte/Link para o Dataset]
-* **Descrição:** Breve explicação sobre o que o dataset representa (ex: dados demográficos, indicadores económicos, etc.).
+**Dataset escolhido:** Energy dataset (`owid-energy-data.csv`).
 
-## ⚙️ Pré-processamento
-Para preparar os dados para a visualização, foram realizadas as seguintes etapas:
+## 🚀 Como reproduzir e executar o projeto
 
-1. **Limpeza:** Remoção de valores nulos e duplicados.
-2. **Transformação:** Conversão de formatos de data e normalização de valores numéricos.
-3. **Agregação:** (Exemplo: Agrupamento de dados por ano/região para facilitar a leitura no D3.js).
-4. **Formatação:** Exportação para formato JSON/CSV compatível com a implementação.
+Para visualizar este projeto localmente:
 
-## 🎯 Objetivo da Visualização
-O que pretendemos transmitir com este trabalho:
+1. **Pré-processamento dos Dados (Opcional):** 
+   ```bash
+   python limpeza_dados.py
+   ```
 
-> "O objetivo principal desta visualização é demonstrar a correlação entre [Variável X] e [Variável Y], permitindo ao utilizador identificar padrões de [Assunto] ao longo do tempo."
+2. **Iniciar o Servidor Local:**
+   ```bash
+   python -m http.server
+   ```
 
-## 🚀 Características da Visualização
-* **Interatividade:** Filtros dinâmicos e suporte para *tooltips* ao passar o rato.
-* **Escalabilidade:** Gráficos responsivos que se ajustam a diferentes resoluções.
-* **Clareza Visual:** Utilização de escalas de cores semânticas para diferenciar categorias.
-* **Navegação:** Capacidade de *zoom* e *pan* para explorar detalhes dos dados.
+3. **Visualizar:**
+   Abrir o navegador e aceder ao endereço http://localhost:8000.
 
-## 🛠️ Tecnologias Utilizadas
-* [D3.js](https://d3js.org/) - Biblioteca JavaScript para manipulação de documentos baseada em dados.
-* HTML5 / CSS3
-* JavaScript (ES6+)
 
----
-**Autor:** Guilherme Lobo  
-**Data:** Abril, 2024
+## 🛠️ Pré-processamento
+Para preparar os dados para visualização (neste caso, usando d3.js), foram aplicados os seguintes passos de transformação no dataset original:
+
+1. **Separação de Entidades:** O dataset original mistura países e agregados regionais na mesma coluna. Foi criada uma distinção baseada na coluna `iso_code`: registos com o código vazio (nulo) foram separados como Regiões, e os restantes mantidos como Países.
+2. **Remoção de Fontes Parciais:** Foram removidas linhas referentes a fontes de dados específicas (entidades com sufixos como `Ember`, `EI`, `EIA` ou `Shift`), pois apresentam demasiados valores nulos nas colunas demográficas (como população e PIB), o que inviabiliza cálculos per capita, para além de existirem dados repetidos, o que inviabiliza a visualização dos dados.
+3. **Filtragem Temporal:** Para lidar com a ausência de dados históricos em energias mais recentes (ex: solar, eólica), os dados foram filtrados para incluir apenas os registos a partir do ano 1990.
+
+*(Nota: O script de transformação e os dados limpos encontram-se disponíveis neste repositório para reprodução do trabalho)*
+
+## Objetivo de cada gráfico
+1. KPIs (Tab 01) — fotografia rápida do estado energético mundial no ano escolhido: população, consumo total, % renováveis, emissões. Ancora a escala antes do leitor explorar o mapa.
+2. Mapa coroplético mundial (Tab 01) — revelar padrões geográficos do mix energético. Onde está a transição mais avançada, onde persiste o fóssil, como varia a energia per capita e as emissões. O slider de ano dá a evolução temporal; o toggle troca a lente analítica sem mudar de gráfico.
+3. Top 15 · Renewables Share (Tab 02) — comparação direta de quem lidera em % de renováveis no mix primário. Permite ver de relance onde Portugal se posiciona globalmente.
+4. Wealth vs Renewables (Tab 02) — testar a hipótese intuitiva de que países ricos são necessariamente mais verdes. O scatter quebra a correlação simplista: Noruega (rica + verde) vs Arábia Saudita (rica + fóssil); Brasil (menos rica + verde). A riqueza explica menos do que se esperava.
+5. Slope chart "Then & Now" (Tab 03) — quantificar a magnitude e direção da transição em Portugal entre o ano-base disponível e 2024, em quatro indicadores-chave (% fóssil, % renováveis, energia/capita, CO₂e/capita do setor elétrico). Lê-se de relance: o indicador subiu ou desceu, e por quanto.
+6. Portugal vs European Peers (Tab 03) — posicionar Portugal face aos vizinhos europeus. Mostra que Portugal lidera em renováveis face a Espanha, França, Alemanha, Reino Unido e Itália.
+
+## 📊 Resultados
+
+Abaixo apresentam-se as visualizações interativas desenvolvidas em D3.js, divididas em três abas de análise distintas:
+
+### 1. [Nome da 1ª Aba - Ex: Visão Global / Evolução Temporal]
+*(Breve frase a explicar o que o gráfico mostra, ex: Evolução do consumo de energias renováveis vs fósseis desde 1990).*
+
+![Captura de ecrã da Aba 1](caminho/para/a/tua/imagem1.png)
+
+### 2. [Nome da 2ª Aba - Ex: Comparação Económica]
+*(Breve frase a explicar o que o gráfico mostra, ex: Relação entre o PIB per capita e a pegada de carbono por país).*
+
+![Captura de ecrã da Aba 2](caminho/para/a/tua/imagem2.png)
+
+### 3. [Nome da 3ª Aba - Ex: Foco num País / Independência Energética]
+*(Breve frase a explicar o que o gráfico mostra, ex: Análise detalhada do panorama energético de Portugal).*
+
+![Captura de ecrã da Aba 3](caminho/para/a/tua/imagem3.png)
+
+
+
+Resumo por aba
+01 · Global Overview — panorama mundial. Vê-se a escala (KPIs) e explora-se a distribuição geográfica das métricas energéticas. Interativo via slider de ano, toggle de métrica, e click-to-zoom em qualquer país para abrir o cartão com o perfil detalhado.
+02 · Country Rankings — comparação entre países. Ranking dos líderes em renováveis + scatter riqueza-vs-renováveis, ambos coordenados pelo mesmo slider de ano.
+03 · Portugal in Focus — foco no caso português. Slope chart da transição ao longo de ~35 anos + posicionamento face aos peers europeus em 2024.

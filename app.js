@@ -1,7 +1,13 @@
 /* =========================================================================
-   Online Retail — Sales Intelligence Report
-   D3.js v7 implementation. Premium dark theme, modular chart functions,
-   lazy panel rendering, click-to-zoom map, and a dedicated Insights panel.
+   Global Energy Transition — D3.js v7 dashboard
+   Data: Our World in Data · cleaned_countries.csv + cleaned_regions.csv
+   Design: premium dark theme inherited from style.css.
+
+   Architecture:
+     - Load both CSVs in parallel, build derived structures once
+     - Lazy-render each panel on first activation (rendered{} flags)
+     - Map / scatter / bars react to a year slider per panel
+     - Single shared tooltip element
    ========================================================================= */
 
 (() => {
@@ -11,56 +17,105 @@
   //  Formatters
   // =======================================================================
   const fmt = {
-    money: (v) => {
-      if (v >= 1e6) return "£" + (v / 1e6).toFixed(2) + "M";
-      if (v >= 1e3) return "£" + (v / 1e3).toFixed(1) + "K";
-      return "£" + d3.format(",.0f")(v);
-    },
-    moneyFull: d3.format(",.2f"),
-    moneyAxis: (v) => {
-      if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-      if (v >= 1e3) return (v / 1e3).toFixed(0) + "K";
-      return v;
-    },
-    count:      d3.format(","),
+    count: d3.format(","),
     countShort: (v) => {
+      if (v == null || isNaN(v)) return "—";
+      if (v >= 1e9) return (v / 1e9).toFixed(1) + "B";
       if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
       if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
-      return String(v);
+      return String(Math.round(v));
     },
-    pct:      d3.format(".1%"),
-    pctShort: d3.format(".0%"),
+    twh: (v) => {
+      if (v == null || isNaN(v)) return "—";
+      if (v >= 1000) return (v / 1000).toFixed(1) + "k TWh";
+      return v.toFixed(0) + " TWh";
+    },
+    pct1: (v) => (v == null || isNaN(v) ? "—" : v.toFixed(1) + "%"),
+    pct0: (v) => (v == null || isNaN(v) ? "—" : Math.round(v) + "%"),
+    kwh:  (v) => (v == null || isNaN(v) ? "—" : fmt.countShort(v) + " kWh"),
+    mt:   (v) => (v == null || isNaN(v) ? "—" : fmt.countShort(v) + " Mt"),
+    int:  (v) => (v == null || isNaN(v) ? "—" : d3.format(",")(Math.round(v))),
   };
-
-  const monthShort = (name) => name.slice(0, 3);
 
   // =======================================================================
-  //  Category palette — adapted for premium dark (Paul Tol-inspired)
+  //  Energy palette — purpose-built per source. Greens for renewables,
+  //  warm tones for fossil fuels, blue for nuclear. Order matters: it's
+  //  the stacking order from base (heaviest historical) to top (newest).
   // =======================================================================
-  const CAT_PALETTE = [
-    "#D4A574", "#D4825E", "#88CCEE", "#CC6677", "#DDCC77",
-    "#44AA99", "#AA4499", "#8DB684", "#B488C2", "#C4946C",
-  ];
-  const categoryColor = d3.scaleOrdinal().range(CAT_PALETTE);
-
-  // Quarter palette — single-hue (gold) progression
-  const QUARTER_COLOUR = {
-    Q1: "#E0C28A",
-    Q2: "#C9A86A",
-    Q3: "#A68B50",
-    Q4: "#806934",
+  const SOURCE_KEYS = ["coal", "oil", "gas", "nuclear", "hydro", "wind", "solar", "other"];
+  const SOURCE_LABEL = {
+    coal: "Coal", oil: "Oil", gas: "Gas",
+    nuclear: "Nuclear", hydro: "Hydro",
+    wind: "Wind", solar: "Solar", other: "Other renewables",
+  };
+  const SOURCE_COLOR = {
+    coal:    "#5C5048",   // dark warm brown
+    oil:     "#8C5E47",   // burnt umber
+    gas:     "#D4825E",   // terracotta
+    nuclear: "#B488C2",   // muted violet
+    hydro:   "#7BA8D4",   // dusty blue
+    wind:    "#8CB5A7",   // sage teal
+    solar:   "#E0C28A",   // warm gold
+    other:   "#98C290",   // sage green
   };
 
-  // Country name reconciliation between our data and world-atlas topojson.
-  const NAME_TO_TOPO = {
-    "EIRE": "Ireland",
-    "USA":  "United States of America",
-    "RSA":  "South Africa",
-    "Czech Republic": "Czechia",
+  // Choropleth: per-metric sequential ramp (low → high)
+  // Greens = "good" direction (more renewables), Reds = "bad" (fossil/emissions).
+  const METRIC_DEF = {
+    renewables_share_energy: {
+      label: "% Renewables in primary energy",
+      domain: [0, 100],
+      colorRange: ["#3A2A2A", "#5C7B3F", "#98C290", "#E0E2A3"],
+      format: fmt.pct1,
+      tooltipLabel: "Renewables share",
+    },
+    fossil_share_energy: {
+      label: "% Fossil in primary energy",
+      domain: [30, 100],
+      colorRange: ["#2A3A2E", "#8C5E47", "#D4825E", "#E8B284"],
+      format: fmt.pct1,
+      tooltipLabel: "Fossil share",
+    },
+    energy_per_capita: {
+      label: "Energy per capita (kWh)",
+      domain: [0, 80000],
+      colorRange: ["#1F2A38", "#4A6580", "#9DB7CC", "#E0EAF2"],
+      format: fmt.kwh,
+      tooltipLabel: "Energy / capita",
+    },
+    ghg_per_capita: {
+      label: "Energy CO₂e per capita (t)",
+      domain: [0, 25],
+      colorRange: ["#2A3A2E", "#7B8954", "#D4A574", "#E08F6B"],
+      format: (v) => (v == null || isNaN(v) ? "—" : v.toFixed(1) + " t"),
+      tooltipLabel: "CO₂e / capita",
+    },
   };
-  const TOPO_TO_NAME = Object.fromEntries(
-    Object.entries(NAME_TO_TOPO).map(([k, v]) => [v, k])
-  );
+
+  // =======================================================================
+  //  Country name reconciliation between OWID and world-atlas topojson.
+  //  world-atlas v2 (110m) uses these short English names.
+  // =======================================================================
+  const TOPO_NAME_TO_OWID = {
+    "United States of America": "United States",
+    "Russia": "Russia",
+    "Czechia": "Czechia",
+    "Dominican Rep.": "Dominican Republic",
+    "Bosnia and Herz.": "Bosnia and Herzegovina",
+    "Eq. Guinea": "Equatorial Guinea",
+    "Central African Rep.": "Central African Republic",
+    "S. Sudan": "South Sudan",
+    "Dem. Rep. Congo": "Democratic Republic of Congo",
+    "Congo": "Congo",
+    "Côte d'Ivoire": "Cote d'Ivoire",
+    "Solomon Is.": "Solomon Islands",
+    "N. Cyprus": "Cyprus",
+    "W. Sahara": "Western Sahara",
+    "Falkland Is.": "Falkland Islands",
+    "Taiwan": "Taiwan",
+    "Korea": "South Korea",
+    "Dem. Rep. Korea": "North Korea",
+  };
 
   // =======================================================================
   //  Shared tooltip
@@ -76,17 +131,26 @@
       tooltipEl.style.left = event.clientX + "px";
       tooltipEl.style.top = event.clientY + "px";
     },
-    hide() {
-      tooltipEl.classList.remove("is-visible");
-    },
+    hide() { tooltipEl.classList.remove("is-visible"); },
   };
 
   // =======================================================================
-  //  Tab controller
+  //  State
   // =======================================================================
-  const rendered = { summary: false, product: false, customer: false, insights: false };
-  let DATA = null;
+  const STATE = {
+    countries: null,    // raw rows for countries
+    regions: null,      // raw rows for regions
+    byIso: null,        // Map: iso3 -> array of yearly rows
+    byCountryName: null,// Map: country name -> iso3 (for topojson lookup)
+    yearMin: 1990,
+    yearMax: 2024,
+    LATEST: 2024,       // Portugal tab anchor (PT + peers have 2024 share data)
+  };
+  const rendered = { overview: false, rankings: false, portugal: false };
 
+  // =======================================================================
+  //  Tab controller (kept simple; pattern from sales-intelligence sibling)
+  // =======================================================================
   function initTabs() {
     const tabs = document.querySelectorAll(".tab");
     const indicator = document.getElementById("tabs-indicator");
@@ -120,15 +184,14 @@
   }
 
   function renderPanel(name) {
-    if (rendered[name] || !DATA) return;
-    if (name === "summary")  renderSummaryPanel(DATA);
-    if (name === "product")  renderProductPanel(DATA);
-    if (name === "customer") renderCustomerPanel(DATA);
-    if (name === "insights") renderInsightsPanel(DATA);
+    if (rendered[name]) return;
+    if (name === "overview") renderOverview();
+    if (name === "rankings") renderRankings();
+    if (name === "portugal") renderPortugal();
     rendered[name] = true;
   }
 
-  // Responsive redraw — rebuild visible panel on resize (debounced)
+  // Debounced redraw on resize for the active panel
   let resizeTimer;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
@@ -137,573 +200,295 @@
       if (!active) return;
       rendered[active] = false;
       document.querySelectorAll(`#panel-${active} .chart`).forEach((el) => (el.innerHTML = ""));
-      document.querySelectorAll(`#panel-${active} .data-table tbody`).forEach((el) => (el.innerHTML = ""));
-      document.querySelectorAll(`#panel-${active} .pair-list`).forEach((el) => (el.innerHTML = ""));
       renderPanel(active);
     }, 180);
   });
 
-  // Entry point
-  fetch("data.json")
-    .then((r) => {
-      if (!r.ok) throw new Error(`data.json failed: ${r.status}`);
-      return r.json();
-    })
-    .then((data) => {
-      DATA = data;
+  // =======================================================================
+  //  Data loading
+  // =======================================================================
+  Promise.all([
+    d3.csv("países_limpos.csv", d3.autoType),
+    d3.csv("regiões_limpas.csv", d3.autoType),
+  ])
+    .then(([countries, regions]) => {
+      STATE.countries = countries;
+      STATE.regions = regions;
+
+      // Index countries by iso_code → array of rows (sorted by year)
+      STATE.byIso = d3.group(countries.filter((d) => d.iso_code), (d) => d.iso_code);
+      STATE.byCountryName = new Map(
+        countries.filter((d) => d.iso_code).map((d) => [d.country, d.iso_code])
+      );
+
+      const years = countries.map((d) => d.year).filter((y) => y != null);
+      STATE.yearMin = d3.min(years);
+      STATE.yearMax = d3.max(years);
+
+      renderMeta();
       initTabs();
-      renderMeta(data.meta);
-      renderPanel("summary");
+      initYearSliders();
+      initMetricToggle();
+      renderPanel("overview");
     })
     .catch((err) => {
       console.error(err);
       document.querySelector(".page").insertAdjacentHTML(
         "afterbegin",
-        `<div style="padding:1rem;background:rgba(201,168,106,0.1);border:1px solid rgba(201,168,106,0.3);
-        border-radius:8px;margin-bottom:1rem;color:#EEEAE0">
-        <strong>Could not load data.json.</strong>
-        Run <code>python preprocessment.py</code> first, then serve this
-        folder over HTTP (see README).</div>`
+        `<div style="padding:1rem;background:rgba(201,168,106,0.1);
+         border:1px solid rgba(201,168,106,0.3);border-radius:8px;
+         margin-bottom:1rem;color:#EEEAE0">
+         <strong>Could not load CSV data.</strong>
+         Make sure países_limpos.csv and regiões_limpas.csv are in the
+         <code>data/</code> folder, and serve the project over HTTP
+         (e.g. <code>python -m http.server</code>).</div>`
       );
     });
 
-  function renderMeta(meta) {
-    if (!meta) return;
-    const from = new Date(meta.dateFrom);
-    const to = new Date(meta.dateTo);
-    const dFmt = d3.timeFormat("%b %Y");
-    document.getElementById("meta-period").textContent = `${dFmt(from)} — ${dFmt(to)}`;
-    document.getElementById("meta-rows").textContent = fmt.count(meta.rows);
-  }
-
-  // Utility: measure widest label for dynamic left margins
-  function measureMaxLabelWidth(labels, fontFamily, fontSize) {
-    const temp = d3.select("body").append("svg")
-      .attr("width", 0).attr("height", 0)
-      .style("position", "absolute").style("visibility", "hidden");
-    let max = 0;
-    labels.forEach((l) => {
-      const t = temp.append("text")
-        .attr("font-family", fontFamily)
-        .attr("font-size", fontSize)
-        .text(l);
-      max = Math.max(max, t.node().getBBox().width);
-    });
-    temp.remove();
-    return max;
+  function renderMeta() {
+    document.getElementById("meta-period").textContent =
+      `${STATE.yearMin} — ${STATE.yearMax}`;
+    document.getElementById("meta-rows").textContent =
+      fmt.count(STATE.countries.length);
   }
 
   // =======================================================================
-  //  Panel 1 · Executive Summary
+  //  Cross-panel controls: year sliders + map metric toggle
   // =======================================================================
-  function renderSummaryPanel(d) {
-    drawKPIs(d.kpis);
-    drawLineMonthlyRevenue(d.revenueByMonth, "#chart-revenue-month");
-    drawDonutQuarters(d.revenueByQuarter, "#chart-revenue-quarter");
-    drawHorizontalBars(d.revenueByCountry, "#chart-revenue-country", {
-      valueKey: "revenue",
-      labelKey: "country",
-      labelFmt: fmt.money,
-      axisFmt:  fmt.moneyAxis,
-      colour:   "var(--accent)",
+  let mapState = { year: 2023, metric: "renewables_share_energy" };
+  let rankYear = 2023;
+
+  function initYearSliders() {
+    // Map slider (drives the choropleth + KPIs)
+    const mapSlider = document.getElementById("year-input");
+    const mapOut = document.getElementById("year-output");
+    mapSlider.addEventListener("input", (e) => {
+      mapState.year = +e.target.value;
+      mapOut.textContent = mapState.year;
+      updateChoropleth();
+      updateKPIs();
+    });
+
+    // Rankings slider (drives the bar chart + scatter)
+    const rankSlider = document.getElementById("year-input-rank");
+    const rankOut = document.getElementById("year-output-rank");
+    rankSlider.addEventListener("input", (e) => {
+      rankYear = +e.target.value;
+      rankOut.textContent = rankYear;
+      drawRenewablesRanking();
+      drawScatter();
     });
   }
 
-  function drawKPIs(kpis) {
-    const values = {
-      totalRevenue:   fmt.money(kpis.totalRevenue),
-      avgOrderValue:  "£" + fmt.moneyFull(kpis.avgOrderValue),
-      totalCustomers: fmt.countShort(kpis.totalCustomers),
-      totalOrders:    fmt.countShort(kpis.totalOrders),
-    };
+  function initMetricToggle() {
+    document.querySelectorAll(".seg").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".seg").forEach((b) => {
+          b.classList.toggle("is-active", b === btn);
+          b.setAttribute("aria-checked", b === btn ? "true" : "false");
+        });
+        mapState.metric = btn.dataset.metric;
+        updateChoropleth();
+        updateLegend();
+      });
+    });
+  }
+
+  // =======================================================================
+  //  Helpers
+  // =======================================================================
+  // Get the row for a given iso/year, or null if missing
+  function getRow(iso, year) {
+    const arr = STATE.byIso.get(iso);
+    if (!arr) return null;
+    return arr.find((d) => d.year === year) || null;
+  }
+
+  // Compute a metric value, including the synthetic ghg_per_capita
+  function metricValue(row, metric) {
+    if (!row) return null;
+    if (metric === "ghg_per_capita") {
+      if (!row.greenhouse_gas_emissions || !row.population) return null;
+      // Mt CO2e * 1e6 / population = tonnes per person
+      return (row.greenhouse_gas_emissions * 1e6) / row.population;
+    }
+    const v = row[metric];
+    return v == null || isNaN(v) ? null : v;
+  }
+
+  // Aggregate world figures from the regions file (entity = "World")
+  function getWorldRow(year) {
+    return STATE.regions.find((d) => d.country === "World" && d.year === year) || null;
+  }
+
+  // Decompose a year row into the 8 source shares we plot.
+  // OWID provides explicit shares for each source as % of primary energy:
+  // coal/oil/gas/nuclear/hydro/wind/solar. "Other renewables" is recovered
+  // as renewables_share - (hydro+wind+solar) — biofuels, geothermal, etc.
+  function rowToShares(row) {
+    if (!row) return null;
+    const coal    = row.coal_share_energy ?? 0;
+    const oil     = row.oil_share_energy ?? 0;
+    const gas     = row.gas_share_energy ?? 0;
+    const nuclear = row.nuclear_share_energy ?? 0;
+    const hydro   = row.hydro_share_energy ?? 0;
+    const wind    = row.wind_share_energy ?? 0;
+    const solar   = row.solar_share_energy ?? 0;
+    const renew   = row.renewables_share_energy ?? 0;
+    // "Other renewables" = total renewables minus the three we plot separately.
+    // Negative values shouldn't happen but clamp at zero just in case.
+    const other = Math.max(0, renew - (hydro + wind + solar));
+
+    return { coal, oil, gas, nuclear, hydro, wind, solar, other };
+  }
+
+  // Build a stacked time series from a list of country/region rows.
+  // We require coal_share_energy (a proxy for "the detailed mix is reported").
+  function buildStackedSeries(rows) {
+    return rows
+      .filter((r) => r.coal_share_energy != null)
+      .sort((a, b) => a.year - b.year)
+      .map((r) => {
+        const s = rowToShares(r);
+        return { year: r.year, ...s };
+      });
+  }
+
+  // =======================================================================
+  //  PANEL 1 · Global Overview
+  // =======================================================================
+  function renderOverview() {
+    updateKPIs();
+    drawChoroplethMap();   // builds the SVG, stores updaters for slider
+  }
+
+  function updateKPIs() {
+    const w = getWorldRow(mapState.year);
+    document.getElementById("kpi-population-sub").textContent = `Year ${mapState.year}`;
+
     document.querySelectorAll(".kpi").forEach((el) => {
       const key = el.dataset.kpi;
-      el.querySelector(".kpi__value").textContent = values[key] ?? "—";
+      const v = el.querySelector(".kpi__value");
+      if (!w) { v.textContent = "—"; return; }
+      if (key === "population")    v.textContent = fmt.countShort(w.population);
+      if (key === "primaryEnergy") v.textContent = fmt.twh(w.primary_energy_consumption);
+      if (key === "renewables")    v.textContent = fmt.pct1(w.renewables_share_energy);
+      if (key === "emissions")     v.textContent = fmt.countShort(w.greenhouse_gas_emissions) + " Mt";
     });
   }
 
-  // Line chart: Revenue by Month
-  function drawLineMonthlyRevenue(data, selector) {
-    const el = document.querySelector(selector);
+  // ---------- Choropleth map ----------
+  // The map function is the most ambitious one. It builds the SVG once,
+  // attaches a paint() helper that updateChoropleth() calls when the
+  // year slider or metric toggle change.
+  let mapPaint = null;     // closure: redraws colours
+  let mapZoomG = null;     // group inside SVG that holds lands
+  let mapPathGen = null;
+  let mapZoom = null;
+
+  function drawChoroplethMap() {
+    const el = document.getElementById("chart-world-map");
     el.innerHTML = "";
     const width = el.clientWidth;
-    const height = 280;
-    const margin = { top: 24, right: 70, bottom: 32, left: 52 };
-
-    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
-
-    const x = d3.scalePoint()
-      .domain(data.map((d) => d.month))
-      .range([margin.left, width - margin.right])
-      .padding(0.3);
-
-    const y = d3.scaleLinear()
-      .domain([0, d3.max(data, (d) => d.revenue) * 1.1])
-      .nice()
-      .range([height - margin.bottom, margin.top]);
-
-    svg.append("g")
-      .selectAll("line")
-      .data(y.ticks(5))
-      .join("line")
-      .attr("class", "gridline")
-      .attr("x1", margin.left).attr("x2", width - margin.right)
-      .attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
-
-    svg.append("g")
-      .attr("class", "axis axis--x")
-      .attr("transform", `translate(0, ${height - margin.bottom})`)
-      .call(d3.axisBottom(x).tickFormat(monthShort).tickSize(0).tickPadding(10))
-      .call((g) => g.select(".domain").remove());
-
-    svg.append("g")
-      .attr("class", "axis axis--y")
-      .attr("transform", `translate(${margin.left}, 0)`)
-      .call(d3.axisLeft(y).ticks(5).tickFormat((v) => "£" + fmt.moneyAxis(v)).tickSize(0).tickPadding(8))
-      .call((g) => g.select(".domain").remove())
-      .call((g) => g.selectAll("line").remove());
-
-    const line = d3.line().x((d) => x(d.month)).y((d) => y(d.revenue)).curve(d3.curveMonotoneX);
-    const area = d3.area().x((d) => x(d.month)).y0(height - margin.bottom).y1((d) => y(d.revenue)).curve(d3.curveMonotoneX);
-
-    const grad = svg.append("defs").append("linearGradient")
-      .attr("id", "lineGrad").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 1);
-    grad.append("stop").attr("offset", "0%").attr("stop-color", "#C9A86A").attr("stop-opacity", 0.3);
-    grad.append("stop").attr("offset", "100%").attr("stop-color", "#C9A86A").attr("stop-opacity", 0);
-
-    svg.append("path").datum(data).attr("class", "area-series").attr("fill", "url(#lineGrad)").attr("opacity", 1).attr("d", area);
-
-    const path = svg.append("path").datum(data).attr("class", "line-series").attr("stroke", "var(--accent)").attr("d", line);
-    const totalLength = path.node().getTotalLength();
-    path.attr("stroke-dasharray", `${totalLength} ${totalLength}`)
-      .attr("stroke-dashoffset", totalLength)
-      .transition().duration(900).ease(d3.easeCubicOut)
-      .attr("stroke-dashoffset", 0);
-
-    svg.append("g").selectAll("circle")
-      .data(data).join("circle")
-      .attr("class", "line-dot")
-      .attr("cx", (d) => x(d.month)).attr("cy", (d) => y(d.revenue))
-      .attr("r", 0).attr("fill", "var(--accent)")
-      .on("mousemove", (event, d) => {
-        tooltip.show(
-          `<div class="tooltip__title">${d.month}</div>
-           <div class="tooltip__row"><span>Revenue</span><strong>£${fmt.moneyFull(d.revenue)}</strong></div>`,
-          event
-        );
-      })
-      .on("mouseleave", () => tooltip.hide())
-      .transition().delay((_, i) => 700 + i * 40).duration(300).attr("r", 4);
-
-    const peak = data.reduce((a, b) => (b.revenue > a.revenue ? b : a));
-    svg.append("text")
-      .attr("class", "direct-label")
-      .attr("x", x(peak.month)).attr("y", y(peak.revenue) - 14)
-      .attr("text-anchor", "middle").attr("fill", "var(--accent)").attr("opacity", 0)
-      .text(`peak · ${fmt.money(peak.revenue)}`)
-      .transition().delay(1200).duration(400).attr("opacity", 1);
-  }
-
-  // Donut chart: Revenue by Quarter
-  function drawDonutQuarters(data, selector) {
-    const el = document.querySelector(selector);
-    el.innerHTML = "";
-    const width = el.clientWidth;
-    const height = 280;
-    const radius = Math.min(width, height) / 2 - 18;
-    const innerRadius = radius * 0.62;
-
-    const svg = d3.select(el).append("svg")
-      .attr("viewBox", [-width / 2, -height / 2, width, height]);
-
-    const pie = d3.pie().value((d) => d.revenue).sort(null).padAngle(0.012);
-    const arc = d3.arc().innerRadius(innerRadius).outerRadius(radius).cornerRadius(3);
-    const arcLabel = d3.arc().innerRadius(radius + 14).outerRadius(radius + 14);
-    const arcs = pie(data);
-
-    svg.append("g").selectAll("path")
-      .data(arcs).join("path")
-      .attr("class", "arc")
-      .attr("fill", (d) => QUARTER_COLOUR[d.data.quarter])
-      .attr("d", arc)
-      .each(function (d) { this._current = { ...d, startAngle: d.endAngle, endAngle: d.endAngle }; })
-      .transition().duration(800).ease(d3.easeCubicOut)
-      .attrTween("d", function (d) {
-        const i = d3.interpolate(this._current, d);
-        this._current = d;
-        return (t) => arc(i(t));
-      });
-
-    svg.selectAll(".arc")
-      .on("mousemove", (event, d) => {
-        tooltip.show(
-          `<div class="tooltip__title">
-            <span class="tooltip__swatch" style="background:${QUARTER_COLOUR[d.data.quarter]}"></span>${d.data.quarter}
-           </div>
-           <div class="tooltip__row"><span>Revenue</span><strong>£${fmt.moneyFull(d.data.revenue)}</strong></div>
-           <div class="tooltip__row"><span>Share</span><strong>${d.data.percentage.toFixed(1)}%</strong></div>`,
-          event
-        );
-      })
-      .on("mouseleave", () => tooltip.hide());
-
-    const labels = svg.append("g").selectAll("g")
-      .data(arcs).join("g")
-      .attr("opacity", 0)
-      .attr("transform", (d) => `translate(${arcLabel.centroid(d)})`);
-
-    labels.append("text")
-      .attr("text-anchor", "middle").attr("dy", -2)
-      .attr("font-family", "var(--font-mono)").attr("font-size", 10).attr("font-weight", 600)
-      .attr("fill", "var(--ink-primary)")
-      .text((d) => d.data.quarter);
-
-    labels.append("text")
-      .attr("text-anchor", "middle").attr("dy", 12)
-      .attr("font-family", "var(--font-mono)").attr("font-size", 10)
-      .attr("fill", "var(--ink-muted)")
-      .text((d) => d.data.percentage.toFixed(0) + "%");
-
-    labels.transition().delay((_, i) => 500 + i * 80).duration(400).attr("opacity", 1);
-
-    const total = d3.sum(data, (d) => d.revenue);
-    const centre = svg.append("g").attr("opacity", 0);
-    centre.append("text")
-      .attr("text-anchor", "middle").attr("dy", -4)
-      .attr("font-family", "var(--font-mono)").attr("font-size", 10)
-      .attr("fill", "var(--ink-muted)").attr("letter-spacing", "0.12em")
-      .text("TOTAL");
-    centre.append("text")
-      .attr("text-anchor", "middle").attr("dy", 18)
-      .attr("font-family", "var(--font-display)").attr("font-style", "italic").attr("font-size", 22)
-      .attr("fill", "var(--ink-primary)")
-      .text(fmt.money(total));
-
-    centre.transition().delay(800).duration(400).attr("opacity", 1);
-  }
-
-  // Horizontal bar chart — generic helper with dynamic left margin
-  function drawHorizontalBars(data, selector, opts) {
-    const {
-      valueKey = "revenue",
-      labelKey = "country",
-      labelFmt = fmt.money,
-      axisFmt  = fmt.moneyAxis,
-      colour   = "var(--accent)",
-      barHeight = 22,
-      padding   = 0.28,
-      valuePrefix = "",
-      valueSuffix = "",
-    } = opts || {};
-
-    const el = document.querySelector(selector);
-    el.innerHTML = "";
-
-    const sorted = [...data].sort((a, b) => b[valueKey] - a[valueKey]);
-    const width = el.clientWidth;
-
-    // Measure longest label to compute left margin
-    const labels = sorted.map((d) => String(d[labelKey]));
-    const measured = measureMaxLabelWidth(labels, '"IBM Plex Mono", monospace', 10);
-    const marginLeft = Math.min(Math.max(measured + 20, 100), width * 0.45);
-
-    const margin = { top: 10, right: 90, bottom: 26, left: marginLeft };
-    const height = Math.max(220, sorted.length * (barHeight / (1 - padding)) + margin.top + margin.bottom);
-
-    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
-
-    const y = d3.scaleBand()
-      .domain(sorted.map((d) => d[labelKey]))
-      .range([margin.top, height - margin.bottom])
-      .padding(padding);
-
-    const x = d3.scaleLinear()
-      .domain([0, d3.max(sorted, (d) => d[valueKey]) * 1.02])
-      .range([margin.left, width - margin.right])
-      .nice();
-
-    svg.append("g").selectAll("line")
-      .data(x.ticks(5)).join("line")
-      .attr("class", "gridline")
-      .attr("x1", (d) => x(d)).attr("x2", (d) => x(d))
-      .attr("y1", margin.top).attr("y2", height - margin.bottom);
-
-    svg.append("g")
-      .attr("class", "axis axis--x")
-      .attr("transform", `translate(0, ${height - margin.bottom})`)
-      .call(d3.axisBottom(x).ticks(5).tickFormat(axisFmt).tickSize(0).tickPadding(6))
-      .call((g) => g.select(".domain").remove());
-
-    svg.append("g")
-      .attr("class", "axis axis--y")
-      .attr("transform", `translate(${margin.left}, 0)`)
-      .call(d3.axisLeft(y).tickSize(0).tickPadding(8))
-      .call((g) => g.select(".domain").remove());
-
-    svg.append("g").attr("class", "bars").selectAll("rect")
-      .data(sorted).join("rect")
-      .attr("class", "bar")
-      .attr("x", margin.left)
-      .attr("y", (d) => y(d[labelKey]))
-      .attr("height", y.bandwidth())
-      .attr("width", 0)
-      .attr("fill", colour)
-      .attr("rx", 1)
-      .on("mousemove", (event, d) => {
-        tooltip.show(
-          `<div class="tooltip__title">${d[labelKey]}</div>
-           <div class="tooltip__row"><span>${valueKey}</span><strong>${valuePrefix}${labelFmt(d[valueKey])}${valueSuffix}</strong></div>`,
-          event
-        );
-      })
-      .on("mouseleave", () => tooltip.hide())
-      .transition().duration(700).delay((_, i) => i * 35).ease(d3.easeCubicOut)
-      .attr("width", (d) => x(d[valueKey]) - margin.left);
-
-    svg.append("g").selectAll("text")
-      .data(sorted).join("text")
-      .attr("class", "direct-label")
-      .attr("x", (d) => x(d[valueKey]) + 6)
-      .attr("y", (d) => y(d[labelKey]) + y.bandwidth() / 2 + 4)
-      .attr("opacity", 0)
-      .text((d) => valuePrefix + labelFmt(d[valueKey]) + valueSuffix)
-      .transition().delay((_, i) => 400 + i * 35).duration(300)
-      .attr("opacity", 1);
-  }
-
-  // =======================================================================
-  //  Panel 2 · Product Performance
-  // =======================================================================
-  function renderProductPanel(d) {
-    categoryColor.domain(d.categoryBreakdown.map((c) => c.category));
-
-    drawTreemap(d.categoryBreakdown, "#chart-category-treemap");
-    drawTopProductsTable(d.topProductsByRevenue, "#table-top-products");
-
-    drawHorizontalBars(d.topProductsByUnits, "#chart-units-description", {
-      valueKey: "unitsSold",
-      labelKey: "description",
-      labelFmt: fmt.count,
-      axisFmt:  fmt.moneyAxis,
-      colour:   "var(--accent)",
-      barHeight: 18,
-      padding:   0.22,
-    });
-  }
-
-  function drawTreemap(data, selector) {
-    const el = document.querySelector(selector);
-    el.innerHTML = "";
-    const width = el.clientWidth;
-    const height = 420;
-
-    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
-
-    const root = d3.hierarchy({ children: data })
-      .sum((d) => d.revenue)
-      .sort((a, b) => b.value - a.value);
-
-    d3.treemap().size([width, height]).paddingInner(3).round(true)(root);
-
-    const cells = svg.append("g").selectAll("g")
-      .data(root.leaves()).join("g")
-      .attr("transform", (d) => `translate(${d.x0}, ${d.y0})`);
-
-    cells.append("rect")
-      .attr("class", "treemap-cell")
-      .attr("width", (d) => Math.max(0, d.x1 - d.x0))
-      .attr("height", 0)
-      .attr("fill", (d) => categoryColor(d.data.category))
-      .attr("rx", 4)
-      .on("mousemove", (event, d) => {
-        tooltip.show(
-          `<div class="tooltip__title">
-            <span class="tooltip__swatch" style="background:${categoryColor(d.data.category)}"></span>${d.data.category}
-           </div>
-           <div class="tooltip__row"><span>Revenue</span><strong>£${fmt.moneyFull(d.data.revenue)}</strong></div>
-           <div class="tooltip__row"><span>Units</span><strong>${fmt.count(d.data.unitsSold)}</strong></div>
-           <div class="tooltip__row"><span>Products</span><strong>${fmt.count(d.data.products)}</strong></div>`,
-          event
-        );
-      })
-      .on("mouseleave", () => tooltip.hide())
-      .transition().duration(700).delay((_, i) => i * 50).ease(d3.easeCubicOut)
-      .attr("height", (d) => Math.max(0, d.y1 - d.y0));
-
-    cells.each(function (d) {
-      const w = d.x1 - d.x0;
-      const h = d.y1 - d.y0;
-      const g = d3.select(this);
-      if (w < 60 || h < 32) return;
-
-      g.append("text")
-        .attr("class", "treemap-label")
-        .attr("x", 12).attr("y", 26)
-        .attr("font-size", w > 160 ? 18 : 14)
-        .attr("opacity", 0)
-        .text(d.data.category)
-        .transition().delay(700).duration(400).attr("opacity", 1);
-
-      if (h > 54) {
-        g.append("text")
-          .attr("class", "treemap-value")
-          .attr("x", 12).attr("y", w > 160 ? 46 : 42)
-          .attr("opacity", 0)
-          .text(fmt.money(d.data.revenue))
-          .transition().delay(800).duration(400).attr("opacity", 1);
-      }
-    });
-  }
-
-  function drawTopProductsTable(rows, selector) {
-    const tbody = document.querySelector(selector + " tbody");
-    tbody.innerHTML = "";
-    rows.forEach((d, i) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><span class="td-rank">${String(i + 1).padStart(2, "0")}</span>&nbsp;${d.description}</td>
-        <td class="num">${fmt.count(d.unitsSold)}</td>
-        <td class="num">£${fmt.moneyFull(d.revenue)}</td>
-      `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  // =======================================================================
-  //  Panel 3 · Customer Analysis  (map with click-zoom)
-  // =======================================================================
-  function renderCustomerPanel(d) {
-    drawCustomerMap(d.customersByCountry, "#chart-customer-map");
-    drawTopCustomersTable(d.topCustomers, "#table-top-customers");
-    drawCustomersByMonth(d.customersByMonth, "#chart-customers-month");
-  }
-
-  function drawCustomerMap(data, selector) {
-    const el = document.querySelector(selector);
-    el.innerHTML = "";
-    const width = el.clientWidth;
-    const height = 480;
+    const height = 520;
 
     const svg = d3.select(el).append("svg")
       .attr("viewBox", [0, 0, width, height])
       .style("cursor", "grab");
 
-    // Ocean background
+    // Ocean
     svg.append("rect")
       .attr("class", "map-ocean")
       .attr("width", width).attr("height", height);
 
-    // Projection: NaturalEarth1 (from d3-geo-projection) with fallback
     const projection = (typeof d3.geoNaturalEarth1 === "function")
       ? d3.geoNaturalEarth1()
       : d3.geoEquirectangular();
 
-    projection.fitExtent(
-      [[10, 10], [width - 10, height - 10]],
-      { type: "Sphere" }
-    );
+    projection.fitExtent([[10, 10], [width - 10, height - 10]], { type: "Sphere" });
+    mapPathGen = d3.geoPath(projection);
 
-    const pathGen = d3.geoPath(projection);
+    mapZoomG = svg.append("g").attr("class", "zoom-root");
 
-    const zoomG = svg.append("g").attr("class", "zoom-root");
-
-    const sortedData = [...data].sort((a, b) => b.customers - a.customers);
-    const rankByCountry = new Map(sortedData.map((d, i) => [d.country, i + 1]));
-    const dataByOurName = new Map(sortedData.map((d) => [d.country, d]));
-
-    const zoom = d3.zoom()
+    mapZoom = d3.zoom()
       .scaleExtent([1, 12])
       .translateExtent([[-width * 0.2, -height * 0.2], [width * 1.2, height * 1.2]])
       .on("zoom", (event) => {
-        zoomG.attr("transform", event.transform);
+        mapZoomG.attr("transform", event.transform);
         const k = event.transform.k;
-        zoomG.selectAll(".map-land").attr("stroke-width", 0.5 / k);
-        zoomG.selectAll(".map-bubble").attr("stroke-width", 1.2 / k);
-        zoomG.selectAll(".map-label").attr("font-size", Math.max(8, 10 / Math.sqrt(k)));
+        mapZoomG.selectAll(".map-land").attr("stroke-width", 0.4 / k);
       });
-    svg.call(zoom);
+    svg.call(mapZoom);
 
+    // Reset + detail panel wiring
     const resetBtn = document.getElementById("map-reset");
     const detailPanel = document.getElementById("map-detail");
-    const detailCloseBtn = document.getElementById("map-detail-close");
-
-    function showResetControls() {
-      resetBtn.classList.add("is-visible");
-    }
-    function resetView() {
+    document.getElementById("map-detail-close").onclick = () => {
+      detailPanel.classList.remove("is-visible");
+      mapZoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
+    };
+    resetBtn.onclick = () => {
       svg.transition().duration(700).ease(d3.easeCubicInOut)
-        .call(zoom.transform, d3.zoomIdentity);
+        .call(mapZoom.transform, d3.zoomIdentity);
       resetBtn.classList.remove("is-visible");
       detailPanel.classList.remove("is-visible");
-      zoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
-    }
-    resetBtn.onclick = resetView;
-    detailCloseBtn.onclick = () => {
-      detailPanel.classList.remove("is-visible");
-      zoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
+      mapZoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
     };
 
     function zoomToFeature(feature) {
-      const bounds = pathGen.bounds(feature);
-      const [[x0, y0], [x1, y1]] = bounds;
-      const cx = (x0 + x1) / 2;
-      const cy = (y0 + y1) / 2;
-      const dx = Math.max(x1 - x0, 1);
-      const dy = Math.max(y1 - y0, 1);
+      const [[x0, y0], [x1, y1]] = mapPathGen.bounds(feature);
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      const dx = Math.max(x1 - x0, 1), dy = Math.max(y1 - y0, 1);
       const scale = Math.min(6, 0.55 / Math.max(dx / width, dy / height));
-      // The detail panel sits at bottom-left (260×180px). We bias the zoom
-      // target upward so the country sits above the panel, not behind it.
-      const panelH = 180;
-      const panelW = 260;
-      const offsetY = -panelH / 3;   // shift up
-      const offsetX = panelW / 4;    // shift slightly right
-      const tx = width / 2 - scale * cx + offsetX;
-      const ty = height / 2 - scale * cy + offsetY;
+      // Bias upward+right so the bottom-left detail panel doesn't cover it
+      const tx = width / 2 - scale * cx + 65;
+      const ty = height / 2 - scale * cy - 60;
       svg.transition().duration(800).ease(d3.easeCubicInOut)
-        .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+        .call(mapZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
     }
 
-    function zoomToPoint(lng, lat, scale = 4.5) {
-      const [cx, cy] = projection([lng, lat]);
-      const panelH = 180;
-      const panelW = 260;
-      const offsetY = -panelH / 3;
-      const offsetX = panelW / 4;
-      const tx = width / 2 - scale * cx + offsetX;
-      const ty = height / 2 - scale * cy + offsetY;
-      svg.transition().duration(800).ease(d3.easeCubicInOut)
-        .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
-    }
+    function populateDetail(iso, name) {
+      const row = getRow(iso, mapState.year);
+      document.getElementById("map-detail-title").textContent = name;
+      document.getElementById("map-detail-eyebrow").textContent =
+        `SELECTED · ${mapState.year}`;
+      const set = (id, val) => document.getElementById(id).textContent = val;
 
-    function populateDetail(countryData) {
-      document.getElementById("map-detail-title").textContent = countryData.country;
-      document.getElementById("md-customers").textContent = fmt.count(countryData.customers);
-      document.getElementById("md-orders").textContent    = fmt.count(countryData.orders);
-      document.getElementById("md-revenue").textContent   = "£" + fmt.moneyFull(countryData.revenue);
-      const aov = countryData.orders > 0 ? countryData.revenue / countryData.orders : 0;
-      const rpc = countryData.customers > 0 ? countryData.revenue / countryData.customers : 0;
-      document.getElementById("md-aov").textContent = "£" + fmt.moneyFull(aov);
-      document.getElementById("md-rpc").textContent = "£" + fmt.moneyFull(rpc);
-      const rank = rankByCountry.get(countryData.country) || "—";
-      document.getElementById("md-rank").textContent = `RANK #${rank} OUTSIDE UK`;
-      document.getElementById("map-detail-eyebrow").textContent = "SELECTED MARKET";
+      if (!row) {
+        set("md-population", "—"); set("md-energy", "—");
+        set("md-renew", "—"); set("md-fossil", "—");
+        set("md-nuclear", "—"); set("md-ghg", "—");
+        document.getElementById("md-rank").textContent = "NO DATA FOR THIS YEAR";
+      } else {
+        set("md-population", fmt.countShort(row.population));
+        set("md-energy",     fmt.twh(row.primary_energy_consumption));
+        set("md-renew",      fmt.pct1(row.renewables_share_energy));
+        set("md-fossil",     fmt.pct1(row.fossil_share_energy));
+        set("md-nuclear",    fmt.pct1(row.nuclear_share_energy));
+        set("md-ghg",        fmt.mt(row.greenhouse_gas_emissions));
+
+        // Rank by current metric within countries that have data this year
+        const metric = mapState.metric;
+        const all = [];
+        STATE.byIso.forEach((arr, iso2) => {
+          const v = metricValue(arr.find((d) => d.year === mapState.year), metric);
+          if (v != null) all.push({ iso: iso2, v });
+        });
+        all.sort((a, b) => b.v - a.v);
+        const idx = all.findIndex((d) => d.iso === iso);
+        if (idx >= 0) {
+          document.getElementById("md-rank").textContent =
+            `RANK #${idx + 1} OF ${all.length} · ${METRIC_DEF[metric].label.toUpperCase()}`;
+        } else {
+          document.getElementById("md-rank").textContent = "NOT RANKED";
+        }
+      }
       detailPanel.classList.add("is-visible");
+      resetBtn.classList.add("is-visible");
     }
 
-    function populateDetailEmpty(countryName) {
-      document.getElementById("map-detail-title").textContent = countryName;
-      document.getElementById("md-customers").textContent = "0";
-      document.getElementById("md-orders").textContent    = "0";
-      document.getElementById("md-revenue").textContent   = "—";
-      document.getElementById("md-aov").textContent       = "—";
-      document.getElementById("md-rpc").textContent       = "—";
-      document.getElementById("md-rank").textContent      = "NO RECORDED CUSTOMERS";
-      document.getElementById("map-detail-eyebrow").textContent = "SELECTED MARKET";
-      detailPanel.classList.add("is-visible");
-    }
-
-    // Loading placeholder
-    const loader = zoomG.append("text")
+    // Loading state
+    const loader = mapZoomG.append("text")
       .attr("x", width / 2).attr("y", height / 2)
       .attr("text-anchor", "middle")
       .attr("font-family", "var(--font-mono)").attr("font-size", 11)
@@ -715,219 +500,270 @@
         loader.remove();
         const countries = topojson.feature(world, world.objects.countries);
 
-        const landSelection = zoomG.append("g").attr("class", "lands")
+        const lands = mapZoomG.append("g").attr("class", "lands")
           .selectAll("path")
           .data(countries.features)
           .join("path")
           .attr("class", "map-land")
-          .attr("d", pathGen);
+          .attr("d", mapPathGen)
+          .on("mousemove", function (event, f) {
+            const name = TOPO_NAME_TO_OWID[f.properties.name] || f.properties.name;
+            const iso = STATE.byCountryName.get(name);
+            const row = iso ? getRow(iso, mapState.year) : null;
+            const v = metricValue(row, mapState.metric);
+            const def = METRIC_DEF[mapState.metric];
+            tooltip.show(
+              `<div class="tooltip__title">${name}</div>
+               <div class="tooltip__row"><span>${def.tooltipLabel}</span>
+                 <strong>${v == null ? "—" : def.format(v)}</strong></div>
+               <div class="tooltip__row"><span>Year</span>
+                 <strong>${mapState.year}</strong></div>`,
+              event
+            );
+          })
+          .on("mouseleave", () => tooltip.hide())
+          .on("click", function (event, f) {
+            event.stopPropagation();
+            const name = TOPO_NAME_TO_OWID[f.properties.name] || f.properties.name;
+            const iso = STATE.byCountryName.get(name);
+            mapZoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
+            d3.select(this).classed("is-selected", true);
+            zoomToFeature(f);
+            if (iso) populateDetail(iso, name);
+            else {
+              const detailPanel = document.getElementById("map-detail");
+              document.getElementById("map-detail-title").textContent = name;
+              document.getElementById("map-detail-eyebrow").textContent = "NO MATCHING DATA";
+              ["md-population","md-energy","md-renew","md-fossil","md-nuclear","md-ghg"]
+                .forEach((id) => document.getElementById(id).textContent = "—");
+              document.getElementById("md-rank").textContent = "—";
+              detailPanel.classList.add("is-visible");
+              resetBtn.classList.add("is-visible");
+            }
+          });
 
-        landSelection.on("click", function (event, feature) {
-          event.stopPropagation();
-          const topoName = feature.properties.name;
-          const ourName = TOPO_TO_NAME[topoName] || topoName;
-          zoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
-          d3.select(this).classed("is-selected", true);
-          zoomToFeature(feature);
-          showResetControls();
-          const cData = dataByOurName.get(ourName);
-          if (cData) populateDetail(cData);
-          else populateDetailEmpty(topoName);
-        });
+        // Closure that paints lands by the active metric+year
+        mapPaint = function () {
+          const def = METRIC_DEF[mapState.metric];
+          const color = d3.scaleLinear()
+            .domain(d3.range(def.colorRange.length).map(
+              (i) => def.domain[0] + (def.domain[1] - def.domain[0]) * i / (def.colorRange.length - 1)
+            ))
+            .range(def.colorRange)
+            .clamp(true);
 
-        drawBubbles(countries);
+          lands.transition().duration(450).ease(d3.easeCubicOut)
+            .attr("fill", (f) => {
+              const name = TOPO_NAME_TO_OWID[f.properties.name] || f.properties.name;
+              const iso = STATE.byCountryName.get(name);
+              const v = metricValue(getRow(iso, mapState.year), mapState.metric);
+              if (v == null) return "var(--bg-elevated)";
+              return color(v);
+            })
+            .attr("class", (f) => {
+              const name = TOPO_NAME_TO_OWID[f.properties.name] || f.properties.name;
+              const iso = STATE.byCountryName.get(name);
+              const v = metricValue(getRow(iso, mapState.year), mapState.metric);
+              return v == null ? "map-land is-no-data" : "map-land";
+            });
+        };
+
+        mapPaint();
+        drawLegend();
       })
       .catch((err) => {
-        console.warn("Could not load world map; drawing bubbles without land.", err);
-        loader.remove();
-        drawBubbles(null);
+        console.error("Map load failed", err);
+        loader.text("could not load map data");
       });
+  }
 
-    function drawBubbles(countries) {
-      const maxCustomers = d3.max(sortedData, (d) => d.customers) || 1;
-      const radius = d3.scaleSqrt().domain([0, maxCustomers]).range([3, 26]);
+  function updateChoropleth() {
+    if (typeof mapPaint === "function") mapPaint();
+  }
 
-      zoomG.append("g").attr("class", "bubbles")
-        .selectAll("circle")
-        .data(sortedData).join("circle")
-        .attr("class", "map-bubble")
-        .attr("cx", (d) => projection([d.lng, d.lat])[0])
-        .attr("cy", (d) => projection([d.lng, d.lat])[1])
-        .attr("r", 0)
-        .attr("fill", "var(--accent-2)")
-        .attr("fill-opacity", 0.55)
-        .attr("stroke", "var(--accent-2)")
-        .attr("stroke-width", 1.2)
-        .on("mousemove", (event, d) => {
-          tooltip.show(
-            `<div class="tooltip__title">${d.country}</div>
-             <div class="tooltip__row"><span>Customers</span><strong>${fmt.count(d.customers)}</strong></div>
-             <div class="tooltip__row"><span>Orders</span><strong>${fmt.count(d.orders)}</strong></div>
-             <div class="tooltip__row"><span>Revenue</span><strong>£${fmt.moneyFull(d.revenue)}</strong></div>`,
-            event
-          );
-        })
-        .on("mouseleave", () => tooltip.hide())
-        .on("click", function (event, d) {
-          event.stopPropagation();
-          tooltip.hide();
-
-          let feature = null;
-          if (countries) {
-            const topoName = NAME_TO_TOPO[d.country] || d.country;
-            feature = countries.features.find((f) => f.properties.name === topoName);
-          }
-          if (feature) {
-            zoomG.selectAll(".map-land.is-selected").classed("is-selected", false);
-            zoomG.selectAll(".map-land")
-              .filter((f) => f === feature)
-              .classed("is-selected", true);
-            zoomToFeature(feature);
-          } else {
-            zoomToPoint(d.lng, d.lat, 5);
-          }
-          showResetControls();
-          populateDetail(d);
-        })
-        .transition().duration(700).delay((_, i) => i * 40).ease(d3.easeCubicOut)
-        .attr("r", (d) => radius(d.customers));
-
-      const top10 = sortedData.slice(0, 10);
-      zoomG.append("g").attr("class", "map-labels")
-        .selectAll("text")
-        .data(top10).join("text")
-        .attr("class", "map-label")
-        .attr("x", (d) => projection([d.lng, d.lat])[0])
-        .attr("y", (d) => projection([d.lng, d.lat])[1] - radius(d.customers) - 6)
-        .attr("text-anchor", "middle")
-        .attr("opacity", 0)
-        .text((d) => d.country)
-        .transition().delay(800).duration(400).attr("opacity", 1);
+  // Map legend (sits inside the map card, bottom-right)
+  function drawLegend() {
+    const card = document.getElementById("map-card");
+    let legend = card.querySelector(".map-legend");
+    if (!legend) {
+      legend = document.createElement("div");
+      legend.className = "map-legend";
+      legend.innerHTML = `
+        <div class="map-legend__title" id="legend-title">—</div>
+        <div class="map-legend__bar" id="legend-bar"></div>
+        <div class="map-legend__ticks">
+          <span id="legend-min">—</span>
+          <span id="legend-max">—</span>
+        </div>`;
+      card.appendChild(legend);
     }
+    updateLegend();
   }
 
-  function drawTopCustomersTable(rows, selector) {
-    const tbody = document.querySelector(selector + " tbody");
-    tbody.innerHTML = "";
-    rows.forEach((d, i) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><span class="td-rank">${String(i + 1).padStart(2, "0")}</span>&nbsp;${d.customerId}</td>
-        <td>${d.country}</td>
-        <td class="num">${fmt.count(d.orders)}</td>
-        <td class="num">£${fmt.moneyFull(d.revenue)}</td>
-      `;
-      tbody.appendChild(tr);
-    });
+  function updateLegend() {
+    const def = METRIC_DEF[mapState.metric];
+    if (!def) return;
+    const stops = def.colorRange.map(
+      (c, i) => `${c} ${(i / (def.colorRange.length - 1) * 100).toFixed(0)}%`
+    ).join(", ");
+    const bar = document.getElementById("legend-bar");
+    if (!bar) return;
+    bar.style.background = `linear-gradient(90deg, ${stops})`;
+    document.getElementById("legend-title").textContent = def.label;
+    document.getElementById("legend-min").textContent = def.format(def.domain[0]);
+    document.getElementById("legend-max").textContent = def.format(def.domain[1]);
   }
 
-  function drawCustomersByMonth(data, selector) {
-    const el = document.querySelector(selector);
+  // ---------- World stacked area ----------
+  function drawWorldStackedArea() {
+    const el = document.getElementById("chart-world-mix");
     el.innerHTML = "";
     const width = el.clientWidth;
-    const height = 280;
-    const margin = { top: 24, right: 24, bottom: 32, left: 48 };
+    const height = 320;
+    const margin = { top: 18, right: 24, bottom: 32, left: 44 };
 
-    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
+    const worldRows = STATE.regions.filter((d) => d.country === "World");
+    const series = buildStackedSeries(worldRows);
+    if (!series.length) {
+      el.innerHTML = `<p style="color:var(--ink-muted);font-family:var(--font-mono);
+        font-size:11px;padding:1rem">No world data available.</p>`;
+      return;
+    }
 
-    const x = d3.scaleBand()
-      .domain(data.map((d) => d.month))
-      .range([margin.left, width - margin.right])
-      .padding(0.35);
+    const stack = d3.stack().keys(SOURCE_KEYS).order(d3.stackOrderNone);
+    const stacked = stack(series);
+
+    const x = d3.scaleLinear()
+      .domain(d3.extent(series, (d) => d.year))
+      .range([margin.left, width - margin.right]);
 
     const y = d3.scaleLinear()
-      .domain([0, d3.max(data, (d) => d.customers) * 1.15])
+      .domain([0, d3.max(stacked, (s) => d3.max(s, (d) => d[1])) || 100])
       .nice()
       .range([height - margin.bottom, margin.top]);
 
+    const svg = d3.select(el).append("svg")
+      .attr("viewBox", [0, 0, width, height]);
+
+    // Gridlines
     svg.append("g").selectAll("line")
-      .data(y.ticks(4)).join("line")
+      .data(y.ticks(5)).join("line")
       .attr("class", "gridline")
       .attr("x1", margin.left).attr("x2", width - margin.right)
       .attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
 
+    // Areas
+    const area = d3.area()
+      .x((d) => x(d.data.year))
+      .y0((d) => y(d[0]))
+      .y1((d) => y(d[1]))
+      .curve(d3.curveMonotoneX);
+
+    svg.append("g").selectAll("path")
+      .data(stacked).join("path")
+      .attr("fill", (d) => SOURCE_COLOR[d.key])
+      .attr("opacity", 0.92)
+      .attr("d", area)
+      .on("mousemove", (event, d) => {
+        // Find the year nearest the mouse
+        const [mx] = d3.pointer(event);
+        const yr = Math.round(x.invert(mx));
+        const point = d.find((p) => p.data.year === yr);
+        const v = point ? (point[1] - point[0]) : null;
+        tooltip.show(
+          `<div class="tooltip__title">
+            <span class="tooltip__swatch" style="background:${SOURCE_COLOR[d.key]}"></span>
+            ${SOURCE_LABEL[d.key]}
+           </div>
+           <div class="tooltip__row"><span>Year</span><strong>${yr}</strong></div>
+           <div class="tooltip__row"><span>Share</span><strong>${v == null ? "—" : v.toFixed(1) + "%"}</strong></div>`,
+          event
+        );
+      })
+      .on("mouseleave", () => tooltip.hide());
+
+    // Axes
     svg.append("g")
       .attr("class", "axis axis--x")
-      .attr("transform", `translate(0, ${height - margin.bottom})`)
-      .call(d3.axisBottom(x).tickFormat(monthShort).tickSize(0).tickPadding(10))
+      .attr("transform", `translate(0,${height - margin.bottom})`)
+      .call(d3.axisBottom(x).ticks(8).tickFormat(d3.format("d")).tickSize(0).tickPadding(8))
       .call((g) => g.select(".domain").remove());
 
     svg.append("g")
       .attr("class", "axis axis--y")
-      .attr("transform", `translate(${margin.left}, 0)`)
-      .call(d3.axisLeft(y).ticks(4).tickSize(0).tickPadding(8))
-      .call((g) => g.select(".domain").remove());
+      .attr("transform", `translate(${margin.left},0)`)
+      .call(d3.axisLeft(y).ticks(5).tickFormat((v) => v + "%").tickSize(0).tickPadding(6))
+      .call((g) => g.select(".domain").remove())
+      .call((g) => g.selectAll("line").remove());
 
-    svg.append("g").selectAll("rect")
-      .data(data).join("rect")
-      .attr("class", "bar")
-      .attr("x", (d) => x(d.month))
-      .attr("width", x.bandwidth())
-      .attr("y", height - margin.bottom)
-      .attr("height", 0)
-      .attr("fill", "var(--accent)")
-      .attr("rx", 2)
-      .on("mousemove", (event, d) => {
-        tooltip.show(
-          `<div class="tooltip__title">${d.month}</div>
-           <div class="tooltip__row"><span>Customers</span><strong>${fmt.count(d.customers)}</strong></div>`,
-          event
-        );
-      })
-      .on("mouseleave", () => tooltip.hide())
-      .transition().duration(700).delay((_, i) => i * 40).ease(d3.easeCubicOut)
-      .attr("y", (d) => y(d.customers))
-      .attr("height", (d) => y(0) - y(d.customers));
-
-    svg.append("g").selectAll("text")
-      .data(data).join("text")
-      .attr("class", "direct-label")
-      .attr("x", (d) => x(d.month) + x.bandwidth() / 2)
-      .attr("y", (d) => y(d.customers) - 6)
-      .attr("text-anchor", "middle")
-      .attr("opacity", 0)
-      .text((d) => fmt.count(d.customers))
-      .transition().delay((_, i) => 500 + i * 40).duration(300)
-      .attr("opacity", 1);
+    // Legend chips below the chart
+    let chips = el.querySelector(".legend-chips");
+    if (!chips) {
+      chips = document.createElement("div");
+      chips.className = "legend-chips";
+      chips.innerHTML = SOURCE_KEYS.map((k) => `
+        <span class="legend-chip">
+          <span class="legend-chip__swatch" style="background:${SOURCE_COLOR[k]}"></span>
+          ${SOURCE_LABEL[k]}
+        </span>`).join("");
+      el.appendChild(chips);
+    }
   }
 
   // =======================================================================
-  //  Panel 4 · Insights (cancellations + product affinity)
+  //  PANEL 2 · Country Rankings
   // =======================================================================
-  function renderInsightsPanel(d) {
-    drawCancelByCategory(d.cancellationsByCategory, "#chart-cancel-category");
-    drawCancelByMonth(d.cancellationsByMonth, "#chart-cancel-month");
-    drawProductPairs(d.productPairs, "#pair-list");
+  function renderRankings() {
+    drawRenewablesRanking();
+    drawScatter();
   }
 
-  function drawCancelByCategory(data, selector) {
-    const el = document.querySelector(selector);
+  function drawRenewablesRanking() {
+    const el = document.getElementById("chart-rank-renewables");
     el.innerHTML = "";
     const width = el.clientWidth;
 
-    const sorted = [...data].sort((a, b) => b.cancelRate - a.cancelRate);
-    const labels = sorted.map((d) => d.category);
-    const measured = measureMaxLabelWidth(labels, '"IBM Plex Mono", monospace', 10);
-    const marginLeft = Math.min(Math.max(measured + 20, 100), width * 0.45);
-    const margin = { top: 10, right: 80, bottom: 26, left: marginLeft };
-    const barHeight = 22;
-    const padding = 0.28;
-    const height = sorted.length * (barHeight / (1 - padding)) + margin.top + margin.bottom;
+    // Build top-15 for the active year, ignoring countries with tiny populations
+    // (small island states with skewed shares would drown the message)
+    const candidates = [];
+    STATE.byIso.forEach((arr, iso) => {
+      const row = arr.find((d) => d.year === rankYear);
+      if (!row) return;
+      if (row.renewables_share_energy == null) return;
+      if (row.population == null || row.population < 1e6) return;
+      candidates.push({
+        iso,
+        country: row.country,
+        value: row.renewables_share_energy,
+      });
+    });
+    candidates.sort((a, b) => b.value - a.value);
+    const top = candidates.slice(0, 15);
+
+    if (!top.length) {
+      el.innerHTML = `<p style="color:var(--ink-muted);font-family:var(--font-mono);
+        font-size:11px;padding:1rem">No share data for ${rankYear}.</p>`;
+      return;
+    }
+
+    const barHeight = 22, padding = 0.26;
+    const margin = { top: 10, right: 70, bottom: 26, left: 130 };
+    const height = top.length * (barHeight / (1 - padding)) + margin.top + margin.bottom;
 
     const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
 
     const y = d3.scaleBand()
-      .domain(sorted.map((d) => d.category))
+      .domain(top.map((d) => d.country))
       .range([margin.top, height - margin.bottom])
       .padding(padding);
 
     const x = d3.scaleLinear()
-      .domain([0, Math.max(d3.max(sorted, (d) => d.cancelRate) * 1.15, 0.01)])
-      .range([margin.left, width - margin.right])
-      .nice();
+      .domain([0, Math.max(100, d3.max(top, (d) => d.value) * 1.05)])
+      .range([margin.left, width - margin.right]);
 
+    // Gridlines
     svg.append("g").selectAll("line")
-      .data(x.ticks(4)).join("line")
+      .data(x.ticks(5)).join("line")
       .attr("class", "gridline")
       .attr("x1", (d) => x(d)).attr("x2", (d) => x(d))
       .attr("y1", margin.top).attr("y2", height - margin.bottom);
@@ -935,7 +771,7 @@
     svg.append("g")
       .attr("class", "axis axis--x")
       .attr("transform", `translate(0, ${height - margin.bottom})`)
-      .call(d3.axisBottom(x).ticks(4).tickFormat(fmt.pctShort).tickSize(0).tickPadding(6))
+      .call(d3.axisBottom(x).ticks(5).tickFormat((v) => v + "%").tickSize(0).tickPadding(6))
       .call((g) => g.select(".domain").remove());
 
     svg.append("g")
@@ -944,180 +780,514 @@
       .call(d3.axisLeft(y).tickSize(0).tickPadding(8))
       .call((g) => g.select(".domain").remove());
 
-    // Colour ramp: higher rate = warmer (terracotta)
-    const maxRate = d3.max(sorted, (d) => d.cancelRate) || 0.01;
-    const colourScale = d3.scaleLinear()
-      .domain([0, maxRate])
-      .range(["#7FA89C", "#D4825E"]);  // sage → terracotta
-
+    // Highlight Portugal in accent-2 if present
     svg.append("g").selectAll("rect")
-      .data(sorted).join("rect")
+      .data(top).join("rect")
       .attr("class", "bar")
       .attr("x", margin.left)
-      .attr("y", (d) => y(d.category))
+      .attr("y", (d) => y(d.country))
       .attr("height", y.bandwidth())
       .attr("width", 0)
-      .attr("fill", (d) => colourScale(d.cancelRate))
+      .attr("fill", (d) => d.iso === "PRT" ? "var(--accent-2)" : "var(--accent-3)")
       .attr("rx", 1)
       .on("mousemove", (event, d) => {
         tooltip.show(
-          `<div class="tooltip__title">${d.category}</div>
-           <div class="tooltip__row"><span>Cancel rate</span><strong>${fmt.pct(d.cancelRate)}</strong></div>
-           <div class="tooltip__row"><span>Cancelled units</span><strong>${fmt.count(d.cancelledUnits)}</strong></div>
-           <div class="tooltip__row"><span>Sold units</span><strong>${fmt.count(d.salesUnits)}</strong></div>`,
+          `<div class="tooltip__title">${d.country}</div>
+           <div class="tooltip__row"><span>Renewables</span><strong>${fmt.pct1(d.value)}</strong></div>
+           <div class="tooltip__row"><span>Year</span><strong>${rankYear}</strong></div>`,
           event
         );
       })
       .on("mouseleave", () => tooltip.hide())
-      .transition().duration(700).delay((_, i) => i * 35).ease(d3.easeCubicOut)
-      .attr("width", (d) => x(d.cancelRate) - margin.left);
+      .transition().duration(700).delay((_, i) => i * 30).ease(d3.easeCubicOut)
+      .attr("width", (d) => x(d.value) - margin.left);
 
     svg.append("g").selectAll("text")
-      .data(sorted).join("text")
+      .data(top).join("text")
       .attr("class", "direct-label")
-      .attr("x", (d) => x(d.cancelRate) + 6)
-      .attr("y", (d) => y(d.category) + y.bandwidth() / 2 + 4)
+      .attr("x", (d) => x(d.value) + 6)
+      .attr("y", (d) => y(d.country) + y.bandwidth() / 2 + 4)
       .attr("opacity", 0)
-      .text((d) => fmt.pct(d.cancelRate))
-      .transition().delay((_, i) => 400 + i * 35).duration(300).attr("opacity", 1);
+      .text((d) => fmt.pct1(d.value))
+      .transition().delay((_, i) => 350 + i * 30).duration(300)
+      .attr("opacity", 1);
   }
 
-  function drawCancelByMonth(data, selector) {
-    const el = document.querySelector(selector);
+  function drawScatter() {
+    const el = document.getElementById("chart-scatter");
     el.innerHTML = "";
     const width = el.clientWidth;
-    const height = 280;
-    const margin = { top: 24, right: 40, bottom: 32, left: 52 };
+    const height = 380;
+    const margin = { top: 18, right: 24, bottom: 42, left: 56 };
+
+    // GDP coverage in OWID lags by ~2 years. If the active year has no GDP,
+    // walk back until we find one that does — and surface that fact in the
+    // chart caption so the user knows which year they're looking at.
+    let scatterYear = rankYear;
+    let pointsCount = 0;
+    while (scatterYear >= STATE.yearMin) {
+      let n = 0;
+      STATE.byIso.forEach((arr) => {
+        const row = arr.find((d) => d.year === scatterYear);
+        if (row && row.gdp != null && row.renewables_share_energy != null
+            && row.population != null && row.population >= 1e6) n++;
+      });
+      if (n >= 20) { pointsCount = n; break; }
+      scatterYear--;
+    }
+    // Update card caption with the resolved year if it differs
+    const cap = el.parentElement.querySelector(".card__caption");
+    if (cap) {
+      cap.innerHTML = scatterYear === rankYear
+        ? "GDP per capita against renewables share · bubble size = population"
+        : `GDP per capita against renewables share · bubble size = population
+           <span style="color:var(--accent);font-style:italic">· data from ${scatterYear} (latest with GDP)</span>`;
+    }
+
+    // Build dataset for the resolved year
+    const points = [];
+    STATE.byIso.forEach((arr, iso) => {
+      const row = arr.find((d) => d.year === scatterYear);
+      if (!row) return;
+      if (row.renewables_share_energy == null) return;
+      if (row.gdp == null || row.population == null) return;
+      if (row.population < 1e6) return; // filter out micro-states
+      points.push({
+        iso,
+        country: row.country,
+        gdpPC: row.gdp / row.population,
+        renew: row.renewables_share_energy,
+        pop: row.population,
+      });
+    });
+
+    if (!points.length) {
+      el.innerHTML = `<p style="color:var(--ink-muted);font-family:var(--font-mono);
+        font-size:11px;padding:1rem">No GDP/renewables data found.</p>`;
+      return;
+    }
+
+    const x = d3.scaleLog()
+      .domain([Math.max(500, d3.min(points, (d) => d.gdpPC) * 0.9),
+               d3.max(points, (d) => d.gdpPC) * 1.1])
+      .range([margin.left, width - margin.right]);
+
+    const y = d3.scaleLinear()
+      .domain([0, Math.max(100, d3.max(points, (d) => d.renew) * 1.05)])
+      .range([height - margin.bottom, margin.top]);
+
+    const r = d3.scaleSqrt()
+      .domain([0, d3.max(points, (d) => d.pop)])
+      .range([2, 26]);
 
     const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
 
-    const x = d3.scalePoint()
-      .domain(data.map((d) => d.month))
-      .range([margin.left, width - margin.right])
-      .padding(0.3);
-
-    const y = d3.scaleLinear()
-      .domain([0, Math.max(d3.max(data, (d) => d.cancelRate) * 1.2, 0.01)])
-      .nice()
-      .range([height - margin.bottom, margin.top]);
-
+    // Gridlines (horizontal)
     svg.append("g").selectAll("line")
-      .data(y.ticks(4)).join("line")
+      .data(y.ticks(5)).join("line")
       .attr("class", "gridline")
       .attr("x1", margin.left).attr("x2", width - margin.right)
       .attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
 
     svg.append("g")
       .attr("class", "axis axis--x")
+      .attr("transform", `translate(0,${height - margin.bottom})`)
+      .call(d3.axisBottom(x).ticks(5, "$~s").tickSize(0).tickPadding(8))
+      .call((g) => g.select(".domain").remove())
+      .append("text")
+      .attr("x", width - margin.right).attr("y", 32)
+      .attr("text-anchor", "end")
+      .attr("font-family", "var(--font-mono)").attr("font-size", 10)
+      .attr("fill", "var(--ink-muted)")
+      .text("GDP per capita (log scale, USD)");
+
+    svg.append("g")
+      .attr("class", "axis axis--y")
+      .attr("transform", `translate(${margin.left},0)`)
+      .call(d3.axisLeft(y).ticks(5).tickFormat((v) => v + "%").tickSize(0).tickPadding(6))
+      .call((g) => g.select(".domain").remove())
+      .call((g) => g.selectAll("line").remove())
+      .append("text")
+      .attr("x", 0).attr("y", margin.top - 6)
+      .attr("font-family", "var(--font-mono)").attr("font-size", 10)
+      .attr("fill", "var(--ink-muted)")
+      .text("% renewables");
+
+    svg.append("g").selectAll("circle")
+      .data(points).join("circle")
+      .attr("cx", (d) => x(d.gdpPC))
+      .attr("cy", (d) => y(d.renew))
+      .attr("r", 0)
+      .attr("fill", (d) => d.iso === "PRT" ? "var(--accent-2)" : "var(--accent-3)")
+      .attr("fill-opacity", (d) => d.iso === "PRT" ? 0.85 : 0.45)
+      .attr("stroke", (d) => d.iso === "PRT" ? "var(--accent-2)" : "var(--accent-3)")
+      .attr("stroke-width", (d) => d.iso === "PRT" ? 2 : 1)
+      .on("mousemove", (event, d) => {
+        tooltip.show(
+          `<div class="tooltip__title">${d.country}</div>
+           <div class="tooltip__row"><span>GDP / capita</span><strong>$${fmt.countShort(d.gdpPC)}</strong></div>
+           <div class="tooltip__row"><span>Renewables</span><strong>${fmt.pct1(d.renew)}</strong></div>
+           <div class="tooltip__row"><span>Population</span><strong>${fmt.countShort(d.pop)}</strong></div>`,
+          event
+        );
+      })
+      .on("mouseleave", () => tooltip.hide())
+      .transition().duration(700).delay((_, i) => i * 6).ease(d3.easeCubicOut)
+      .attr("r", (d) => r(d.pop));
+
+    // Direct label for Portugal
+    const pt = points.find((d) => d.iso === "PRT");
+    if (pt) {
+      svg.append("text")
+        .attr("class", "direct-label")
+        .attr("x", x(pt.gdpPC) + r(pt.pop) + 4)
+        .attr("y", y(pt.renew) + 4)
+        .attr("fill", "var(--accent-2)")
+        .attr("opacity", 0)
+        .text("Portugal")
+        .transition().delay(900).duration(400).attr("opacity", 1);
+    }
+  }
+
+  // =======================================================================
+  //  PANEL 3 · Portugal in Focus
+  // =======================================================================
+  function renderPortugal() {
+    drawPortugalSlope();
+    drawPortugalVsEU();
+  }
+
+  function drawPortugalStackedArea() {
+    const el = document.getElementById("chart-pt-mix");
+    el.innerHTML = "";
+    const width = el.clientWidth;
+    const height = 340;
+    const margin = { top: 18, right: 24, bottom: 32, left: 44 };
+
+    const ptRows = (STATE.byIso.get("PRT") || []);
+    const series = buildStackedSeries(ptRows);
+    if (!series.length) {
+      el.innerHTML = `<p style="color:var(--ink-muted);padding:1rem">No data.</p>`;
+      return;
+    }
+
+    const stack = d3.stack().keys(SOURCE_KEYS).order(d3.stackOrderNone);
+    const stacked = stack(series);
+
+    const x = d3.scaleLinear()
+      .domain(d3.extent(series, (d) => d.year))
+      .range([margin.left, width - margin.right]);
+
+    const y = d3.scaleLinear()
+      .domain([0, d3.max(stacked, (s) => d3.max(s, (d) => d[1])) || 100])
+      .nice()
+      .range([height - margin.bottom, margin.top]);
+
+    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
+
+    svg.append("g").selectAll("line")
+      .data(y.ticks(5)).join("line")
+      .attr("class", "gridline")
+      .attr("x1", margin.left).attr("x2", width - margin.right)
+      .attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+
+    const area = d3.area()
+      .x((d) => x(d.data.year))
+      .y0((d) => y(d[0]))
+      .y1((d) => y(d[1]))
+      .curve(d3.curveMonotoneX);
+
+    svg.append("g").selectAll("path")
+      .data(stacked).join("path")
+      .attr("fill", (d) => SOURCE_COLOR[d.key])
+      .attr("opacity", 0.92)
+      .attr("d", area)
+      .on("mousemove", (event, d) => {
+        const [mx] = d3.pointer(event);
+        const yr = Math.round(x.invert(mx));
+        const point = d.find((p) => p.data.year === yr);
+        const v = point ? (point[1] - point[0]) : null;
+        tooltip.show(
+          `<div class="tooltip__title">
+            <span class="tooltip__swatch" style="background:${SOURCE_COLOR[d.key]}"></span>
+            ${SOURCE_LABEL[d.key]}
+           </div>
+           <div class="tooltip__row"><span>Year</span><strong>${yr}</strong></div>
+           <div class="tooltip__row"><span>Share</span><strong>${v == null ? "—" : v.toFixed(1) + "%"}</strong></div>`,
+          event
+        );
+      })
+      .on("mouseleave", () => tooltip.hide());
+
+    svg.append("g")
+      .attr("class", "axis axis--x")
+      .attr("transform", `translate(0,${height - margin.bottom})`)
+      .call(d3.axisBottom(x).ticks(8).tickFormat(d3.format("d")).tickSize(0).tickPadding(8))
+      .call((g) => g.select(".domain").remove());
+
+    svg.append("g")
+      .attr("class", "axis axis--y")
+      .attr("transform", `translate(${margin.left},0)`)
+      .call(d3.axisLeft(y).ticks(5).tickFormat((v) => v + "%").tickSize(0).tickPadding(6))
+      .call((g) => g.select(".domain").remove())
+      .call((g) => g.selectAll("line").remove());
+
+    let chips = el.querySelector(".legend-chips");
+    if (!chips) {
+      chips = document.createElement("div");
+      chips.className = "legend-chips";
+      chips.innerHTML = SOURCE_KEYS.map((k) => `
+        <span class="legend-chip">
+          <span class="legend-chip__swatch" style="background:${SOURCE_COLOR[k]}"></span>
+          ${SOURCE_LABEL[k]}
+        </span>`).join("");
+      el.appendChild(chips);
+    }
+  }
+
+  // ---------- Slope chart ----------
+  // Compares Portugal's earliest-available year vs latest year (2024) across
+  // 4 indicators. Each indicator can have a different start year because
+  // OWID coverage varies per series — we surface the actual year next to the
+  // baseline value when it differs from 1990.
+  function drawPortugalSlope() {
+    const el = document.getElementById("chart-pt-slope");
+    el.innerHTML = "";
+    const width = el.clientWidth;
+    const height = 360;
+    const margin = { top: 32, right: 110, bottom: 36, left: 110 };
+
+    const ptArr = (STATE.byIso.get("PRT") || []).slice().sort((a, b) => a.year - b.year);
+    const r2024 = ptArr.find((d) => d.year === STATE.LATEST);
+    if (!r2024) {
+      el.innerHTML = `<p style="color:var(--ink-muted);padding:1rem">No 2024 data.</p>`;
+      return;
+    }
+
+    // Helper: find first row whose `key` is a number (handles the GHG NaNs)
+    const firstWith = (key) => ptArr.find((r) => r[key] != null && !isNaN(r[key]));
+
+    // GHG per capita (electricity sector only — see methodology note)
+    const ghgPerCap = (r) => {
+      if (!r || r.greenhouse_gas_emissions == null || !r.population) return null;
+      return (r.greenhouse_gas_emissions * 1e6) / r.population;
+    };
+    const firstWithGhg = ptArr.find((r) => ghgPerCap(r) != null);
+
+    const indicators = [
+      {
+        label: "% Fossil",
+        before: firstWith("fossil_share_energy"),
+        v1Key: "fossil_share_energy", v2Key: "fossil_share_energy",
+        good: "down", fmt: fmt.pct1,
+      },
+      {
+        label: "% Renewables",
+        before: firstWith("renewables_share_energy"),
+        v1Key: "renewables_share_energy", v2Key: "renewables_share_energy",
+        good: "up", fmt: fmt.pct1,
+      },
+      {
+        label: "Energy / capita",
+        before: firstWith("energy_per_capita"),
+        v1Key: "energy_per_capita", v2Key: "energy_per_capita",
+        good: "neutral", fmt: fmt.kwh,
+      },
+      {
+        label: "Power CO₂e / cap",
+        before: firstWithGhg,
+        // Custom getters because this is derived
+        getV1: (r) => ghgPerCap(r),
+        getV2: (r) => ghgPerCap(r),
+        good: "down", fmt: (v) => (v == null || isNaN(v) ? "—" : v.toFixed(1) + " t"),
+      },
+    ].filter((ind) => ind.before).map((ind) => {
+      const v1 = ind.getV1 ? ind.getV1(ind.before) : ind.before[ind.v1Key];
+      const v2 = ind.getV2 ? ind.getV2(r2024) : r2024[ind.v2Key];
+      return { ...ind, v1, v2, year1: ind.before.year };
+    });
+
+    if (!indicators.length) {
+      el.innerHTML = `<p style="color:var(--ink-muted);padding:1rem">No comparable indicators.</p>`;
+      return;
+    }
+
+    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
+    const xL = margin.left;
+    const xR = width - margin.right;
+
+    // Year headers
+    svg.append("text")
+      .attr("x", xL).attr("y", 18)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "var(--font-mono)").attr("font-size", 10)
+      .attr("letter-spacing", "0.12em").attr("fill", "var(--ink-muted)")
+      .text("EARLIEST");
+    svg.append("text")
+      .attr("x", xR).attr("y", 18)
+      .attr("text-anchor", "middle")
+      .attr("font-family", "var(--font-mono)").attr("font-size", 10)
+      .attr("letter-spacing", "0.12em").attr("fill", "var(--ink-muted)")
+      .text(`${STATE.LATEST}`);
+
+    // Vertical guides
+    [xL, xR].forEach((cx) => {
+      svg.append("line")
+        .attr("x1", cx).attr("x2", cx)
+        .attr("y1", margin.top).attr("y2", height - margin.bottom)
+        .attr("stroke", "var(--line-faint)").attr("stroke-width", 1);
+    });
+
+    const innerH = height - margin.top - margin.bottom;
+    const bandH = innerH / indicators.length;
+
+    indicators.forEach((ind, i) => {
+      const cy = margin.top + bandH * (i + 0.5);
+      const span = bandH * 0.32;
+      const max = Math.max(ind.v1, ind.v2);
+      const min = Math.min(ind.v1, ind.v2);
+      const range = max - min || 1;
+      const yScale = (v) => cy + span * (1 - 2 * (v - min) / range);
+
+      const y1 = yScale(ind.v1);
+      const y2 = yScale(ind.v2);
+
+      // Direction colour (only for clearly directional indicators)
+      let stroke = "var(--accent)"; // neutral default
+      if (ind.good !== "neutral") {
+        const went = ind.good === "down" ? (ind.v2 < ind.v1) : (ind.v2 > ind.v1);
+        stroke = went ? "var(--accent-3)" : "var(--accent-2)";
+      }
+
+      svg.append("line")
+        .attr("class", "slope-line")
+        .attr("x1", xL).attr("y1", y1)
+        .attr("x2", xL).attr("y2", y1)
+        .attr("stroke", stroke)
+        .transition().duration(900).delay(i * 120).ease(d3.easeCubicOut)
+        .attr("x2", xR).attr("y2", y2);
+
+      svg.append("circle").attr("class", "slope-dot")
+        .attr("cx", xL).attr("cy", y1).attr("r", 5).attr("fill", stroke);
+      svg.append("circle").attr("class", "slope-dot")
+        .attr("cx", xR).attr("cy", y2).attr("r", 5).attr("fill", stroke);
+
+      // Left: indicator name
+      svg.append("text").attr("class", "slope-label")
+        .attr("x", xL - 12).attr("y", y1 + 4)
+        .attr("text-anchor", "end")
+        .text(ind.label);
+
+      // Left: baseline value + actual year
+      svg.append("text").attr("class", "slope-value")
+        .attr("x", xL - 12).attr("y", y1 + 18)
+        .attr("text-anchor", "end")
+        .attr("fill", "var(--ink-muted)")
+        .text(`${ind.fmt(ind.v1)} · ${ind.year1}`);
+
+      // Right: latest value
+      svg.append("text").attr("class", "slope-value")
+        .attr("x", xR + 12).attr("y", y2 + 4)
+        .attr("font-weight", 600).attr("fill", "var(--ink-primary)")
+        .text(ind.fmt(ind.v2));
+
+      // Right: delta %
+      const delta = ind.v2 - ind.v1;
+      const pct = ind.v1 ? ((delta / ind.v1) * 100) : null;
+      const pctStr = pct == null ? "" :
+        (pct > 0 ? "+" : "") + (Math.abs(pct) >= 100 ? pct.toFixed(0) : pct.toFixed(0)) + "%";
+      svg.append("text").attr("class", "slope-value")
+        .attr("x", xR + 12).attr("y", y2 + 18)
+        .attr("fill", stroke)
+        .text(pctStr);
+    });
+  }
+
+  // ---------- Portugal vs European peers (latest year, horizontal bars) ----
+  function drawPortugalVsEU() {
+    const el = document.getElementById("chart-pt-vs-eu");
+    el.innerHTML = "";
+    const width = el.clientWidth;
+
+    const peers = ["PRT", "ESP", "FRA", "DEU", "ITA", "GBR"];
+    const data = peers
+      .map((iso) => {
+        const arr = STATE.byIso.get(iso);
+        const row = arr && arr.find((d) => d.year === STATE.LATEST);
+        return row ? {
+          iso, country: row.country,
+          renew: row.renewables_share_energy,
+        } : null;
+      })
+      .filter((d) => d && d.renew != null)
+      .sort((a, b) => b.renew - a.renew);
+
+    if (!data.length) {
+      el.innerHTML = `<p style="color:var(--ink-muted);padding:1rem">No peer data.</p>`;
+      return;
+    }
+
+    const barHeight = 28, padding = 0.30;
+    const margin = { top: 12, right: 70, bottom: 26, left: 100 };
+    const height = data.length * (barHeight / (1 - padding)) + margin.top + margin.bottom;
+
+    const svg = d3.select(el).append("svg").attr("viewBox", [0, 0, width, height]);
+
+    const y = d3.scaleBand()
+      .domain(data.map((d) => d.country))
+      .range([margin.top, height - margin.bottom])
+      .padding(padding);
+
+    const x = d3.scaleLinear()
+      .domain([0, Math.max(50, d3.max(data, (d) => d.renew) * 1.05)])
+      .range([margin.left, width - margin.right]);
+
+    svg.append("g").selectAll("line")
+      .data(x.ticks(5)).join("line")
+      .attr("class", "gridline")
+      .attr("x1", (d) => x(d)).attr("x2", (d) => x(d))
+      .attr("y1", margin.top).attr("y2", height - margin.bottom);
+
+    svg.append("g")
+      .attr("class", "axis axis--x")
       .attr("transform", `translate(0, ${height - margin.bottom})`)
-      .call(d3.axisBottom(x).tickFormat(monthShort).tickSize(0).tickPadding(10))
+      .call(d3.axisBottom(x).ticks(5).tickFormat((v) => v + "%").tickSize(0).tickPadding(6))
       .call((g) => g.select(".domain").remove());
 
     svg.append("g")
       .attr("class", "axis axis--y")
       .attr("transform", `translate(${margin.left}, 0)`)
-      .call(d3.axisLeft(y).ticks(4).tickFormat(fmt.pctShort).tickSize(0).tickPadding(8))
-      .call((g) => g.select(".domain").remove())
-      .call((g) => g.selectAll("line").remove());
+      .call(d3.axisLeft(y).tickSize(0).tickPadding(8))
+      .call((g) => g.select(".domain").remove());
 
-    const line = d3.line()
-      .x((d) => x(d.month))
-      .y((d) => y(d.cancelRate))
-      .curve(d3.curveMonotoneX);
-
-    const grad = svg.append("defs").append("linearGradient")
-      .attr("id", "cancelGrad").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 1);
-    grad.append("stop").attr("offset", "0%").attr("stop-color", "#D4825E").attr("stop-opacity", 0.3);
-    grad.append("stop").attr("offset", "100%").attr("stop-color", "#D4825E").attr("stop-opacity", 0);
-
-    const area = d3.area()
-      .x((d) => x(d.month))
-      .y0(height - margin.bottom)
-      .y1((d) => y(d.cancelRate))
-      .curve(d3.curveMonotoneX);
-
-    svg.append("path").datum(data)
-      .attr("class", "area-series")
-      .attr("fill", "url(#cancelGrad)")
-      .attr("opacity", 1)
-      .attr("d", area);
-
-    const path = svg.append("path").datum(data)
-      .attr("class", "line-series")
-      .attr("stroke", "var(--accent-2)")
-      .attr("d", line);
-
-    const totalLength = path.node().getTotalLength();
-    path.attr("stroke-dasharray", `${totalLength} ${totalLength}`)
-      .attr("stroke-dashoffset", totalLength)
-      .transition().duration(900).ease(d3.easeCubicOut)
-      .attr("stroke-dashoffset", 0);
-
-    svg.append("g").selectAll("circle")
-      .data(data).join("circle")
-      .attr("class", "line-dot")
-      .attr("cx", (d) => x(d.month))
-      .attr("cy", (d) => y(d.cancelRate))
-      .attr("r", 0)
-      .attr("fill", "var(--accent-2)")
+    svg.append("g").selectAll("rect")
+      .data(data).join("rect")
+      .attr("class", "bar")
+      .attr("x", margin.left)
+      .attr("y", (d) => y(d.country))
+      .attr("height", y.bandwidth())
+      .attr("width", 0)
+      .attr("fill", (d) => d.iso === "PRT" ? "var(--accent-2)" : "var(--accent-3)")
+      .attr("rx", 1)
       .on("mousemove", (event, d) => {
         tooltip.show(
-          `<div class="tooltip__title">${d.month}</div>
-           <div class="tooltip__row"><span>Cancel rate</span><strong>${fmt.pct(d.cancelRate)}</strong></div>
-           <div class="tooltip__row"><span>Cancelled</span><strong>${fmt.count(d.cancelledUnits)}</strong></div>
-           <div class="tooltip__row"><span>Sold</span><strong>${fmt.count(d.salesUnits)}</strong></div>`,
+          `<div class="tooltip__title">${d.country}</div>
+           <div class="tooltip__row"><span>Renewables</span><strong>${fmt.pct1(d.renew)}</strong></div>`,
           event
         );
       })
       .on("mouseleave", () => tooltip.hide())
-      .transition().delay((_, i) => 700 + i * 40).duration(300).attr("r", 4);
-  }
+      .transition().duration(700).delay((_, i) => i * 60).ease(d3.easeCubicOut)
+      .attr("width", (d) => x(d.renew) - margin.left);
 
-  function drawProductPairs(pairs, selector) {
-    const container = document.querySelector(selector);
-    container.innerHTML = "";
-    if (!pairs || pairs.length === 0) {
-      container.innerHTML = `<p style="padding:1rem;color:var(--ink-muted);
-        font-style:italic">No product pair data available.</p>`;
-      return;
-    }
-
-    const maxCount = pairs[0].count;
-
-    pairs.forEach((p, i) => {
-      const row = document.createElement("div");
-      row.className = "pair-row";
-
-      const bar = document.createElement("div");
-      bar.className = "pair-row__bar";
-      bar.style.width = `${(p.count / maxCount) * 100}%`;
-
-      row.innerHTML = `
-        <span class="pair-row__rank">${String(i + 1).padStart(2, "0")}</span>
-        <div class="pair-row__items">
-          <span class="pair-row__item" title="${p.productA}">${p.productA}</span>
-          <span class="pair-row__item" title="${p.productB}">${p.productB}</span>
-        </div>
-        <span class="pair-row__count">${fmt.count(p.count)}×</span>
-      `;
-      row.appendChild(bar);
-
-      row.addEventListener("mousemove", (event) => {
-        tooltip.show(
-          `<div class="tooltip__title">Bought together</div>
-           <div class="tooltip__row" style="flex-direction:column;align-items:flex-start;gap:2px">
-             <span>${p.productA}</span>
-             <span style="color:var(--accent)">+ ${p.productB}</span>
-           </div>
-           <div class="tooltip__row" style="margin-top:6px">
-             <span>Co-occurrences</span><strong>${fmt.count(p.count)}</strong>
-           </div>`,
-          event
-        );
-      });
-      row.addEventListener("mouseleave", () => tooltip.hide());
-
-      container.appendChild(row);
-    });
+    svg.append("g").selectAll("text")
+      .data(data).join("text")
+      .attr("class", "direct-label")
+      .attr("x", (d) => x(d.renew) + 6)
+      .attr("y", (d) => y(d.country) + y.bandwidth() / 2 + 4)
+      .attr("opacity", 0)
+      .text((d) => fmt.pct1(d.renew))
+      .transition().delay((_, i) => 400 + i * 60).duration(300)
+      .attr("opacity", 1);
   }
 })();

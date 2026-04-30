@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Online Retail · Sales Analytics</title>
+  <title>Global Energy · Mix &amp; Transition</title>
 
   <!-- Typography: Fraunces (display serif) + IBM Plex Sans / Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -30,15 +30,15 @@
       <div class="masthead__brand">
         <div class="mark" aria-hidden="true"></div>
         <div>
-          <p class="eyebrow">UCI · Online Retail</p>
-          <h1 class="title">Sales Intelligence Report</h1>
+          <p class="eyebrow">Our World in Data · Energy</p>
+          <h1 class="title">Global Energy Transition</h1>
         </div>
       </div>
       <div class="masthead__meta">
         <p class="meta-line">
           <span id="meta-period">—</span>
           <span class="meta-sep">·</span>
-          <span id="meta-rows">—</span>&nbsp;transactions
+          <span id="meta-rows">—</span>&nbsp;country-years
         </p>
       </div>
     </header>
@@ -47,232 +47,154 @@
     <!-- Tabs                                                            -->
     <!-- ============================================================== -->
     <nav class="tabs" role="tablist" aria-label="Report sections">
-      <button class="tab is-active" role="tab" data-panel="summary"
-              aria-selected="true" aria-controls="panel-summary">
+      <button class="tab is-active" role="tab" data-panel="overview"
+              aria-selected="true" aria-controls="panel-overview">
         <span class="tab__num">01</span>
-        <span class="tab__label">Executive Summary</span>
+        <span class="tab__label">Global Overview</span>
       </button>
-      <button class="tab" role="tab" data-panel="product"
-              aria-selected="false" aria-controls="panel-product">
+      <button class="tab" role="tab" data-panel="rankings"
+              aria-selected="false" aria-controls="panel-rankings">
         <span class="tab__num">02</span>
-        <span class="tab__label">Product Performance</span>
+        <span class="tab__label">Country Rankings</span>
       </button>
-      <button class="tab" role="tab" data-panel="customer"
-              aria-selected="false" aria-controls="panel-customer">
+      <button class="tab" role="tab" data-panel="portugal"
+              aria-selected="false" aria-controls="panel-portugal">
         <span class="tab__num">03</span>
-        <span class="tab__label">Customer Analysis</span>
-      </button>
-      <button class="tab" role="tab" data-panel="insights"
-              aria-selected="false" aria-controls="panel-insights">
-        <span class="tab__num">04</span>
-        <span class="tab__label">Insights</span>
+        <span class="tab__label">Portugal in Focus</span>
       </button>
       <div class="tabs__rail"><div class="tabs__indicator" id="tabs-indicator"></div></div>
     </nav>
 
     <!-- ============================================================== -->
-    <!-- Panel 1 · Executive Summary                                     -->
+    <!-- Panel 1 · Global Overview                                       -->
     <!-- ============================================================== -->
-    <section id="panel-summary" class="panel is-active" role="tabpanel">
+    <section id="panel-overview" class="panel is-active" role="tabpanel">
 
       <div class="kpi-grid">
-        <article class="kpi" data-kpi="totalRevenue">
-          <p class="kpi__label">Total Revenue</p>
+        <article class="kpi" data-kpi="population">
+          <p class="kpi__label">World Population</p>
           <p class="kpi__value">—</p>
-          <p class="kpi__sub">Across all markets</p>
+          <p class="kpi__sub" id="kpi-population-sub">Latest year</p>
         </article>
-        <article class="kpi" data-kpi="avgOrderValue">
-          <p class="kpi__label">Average Order Value</p>
+        <article class="kpi" data-kpi="primaryEnergy">
+          <p class="kpi__label">Primary Energy</p>
           <p class="kpi__value">—</p>
-          <p class="kpi__sub">Per invoice</p>
+          <p class="kpi__sub">Total consumption · TWh</p>
         </article>
-        <article class="kpi" data-kpi="totalCustomers">
-          <p class="kpi__label">Total Customers</p>
+        <article class="kpi" data-kpi="renewables">
+          <p class="kpi__label">Renewables Share</p>
           <p class="kpi__value">—</p>
-          <p class="kpi__sub">Unique identifiers</p>
+          <p class="kpi__sub">Of primary energy</p>
         </article>
-        <article class="kpi" data-kpi="totalOrders">
-          <p class="kpi__label">Total Orders</p>
+        <article class="kpi" data-kpi="emissions">
+          <p class="kpi__label">GHG Emissions</p>
           <p class="kpi__value">—</p>
-          <p class="kpi__sub">Distinct invoices</p>
+          <p class="kpi__sub">Energy sector · Mt CO₂e</p>
         </article>
       </div>
 
-      <div class="row row--split">
-        <section class="card card--chart col-8">
-          <header class="card__head">
-            <h2 class="card__title">Revenue by Month</h2>
-            <p class="card__caption">Monthly sales trajectory across the reporting period</p>
-          </header>
-          <div id="chart-revenue-month" class="chart"></div>
-        </section>
-
-        <section class="card card--chart col-4">
-          <header class="card__head">
-            <h2 class="card__title">Revenue by Quarter</h2>
-            <p class="card__caption">Share of total annual revenue</p>
-          </header>
-          <div id="chart-revenue-quarter" class="chart chart--donut"></div>
-        </section>
-      </div>
-
-      <section class="card card--chart">
-        <header class="card__head">
-          <h2 class="card__title">Revenue by Country <span class="card__hint">excluding United Kingdom</span></h2>
-          <p class="card__caption">International markets ranked by total revenue contribution</p>
-        </header>
-        <div id="chart-revenue-country" class="chart"></div>
-      </section>
-    </section>
-
-    <!-- ============================================================== -->
-    <!-- Panel 2 · Product Performance                                   -->
-    <!-- ============================================================== -->
-    <section id="panel-product" class="panel" role="tabpanel">
-
-      <div class="row row--split">
-        <section class="card card--chart col-7">
-          <header class="card__head">
-            <h2 class="card__title">Revenue by Category</h2>
-            <p class="card__caption">Categories derived from product description keywords · click a cell to focus</p>
-          </header>
-          <div id="chart-category-treemap" class="chart chart--treemap"></div>
-        </section>
-
-        <section class="card card--table col-5">
-          <header class="card__head">
-            <h2 class="card__title">Top Products</h2>
-            <p class="card__caption">Ranked by revenue contribution</p>
-          </header>
-          <div class="table-wrap">
-            <table class="data-table" id="table-top-products">
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th class="num">Units Sold</th>
-                  <th class="num">Revenue</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+      <section class="card card--chart" id="map-card">
+        <header class="card__head card__head--with-controls">
+          <div>
+            <h2 class="card__title">World Energy Map <span class="card__hint">click a country to focus</span></h2>
+            <p class="card__caption">Colour each country by metric · scrub the timeline to see how the world changed</p>
           </div>
-        </section>
-      </div>
-
-      <section class="card card--chart">
-        <header class="card__head">
-          <h2 class="card__title">Top Products by Units Sold</h2>
-          <p class="card__caption">Highest-volume items across all transactions</p>
-        </header>
-        <div id="chart-units-description" class="chart"></div>
-      </section>
-    </section>
-
-    <!-- ============================================================== -->
-    <!-- Panel 3 · Customer Analysis                                     -->
-    <!-- ============================================================== -->
-    <section id="panel-customer" class="panel" role="tabpanel">
-
-      <div class="row row--split">
-        <section class="card card--chart col-7" id="map-card">
-          <header class="card__head">
-            <h2 class="card__title">Customers by Country <span class="card__hint">excluding United Kingdom</span></h2>
-            <p class="card__caption">Click a bubble or country to zoom in and reveal local statistics</p>
-          </header>
-          <div id="chart-customer-map" class="chart chart--map"></div>
-
-          <button class="map-reset" id="map-reset" aria-label="Reset map view">← Reset</button>
-
-          <aside class="map-detail" id="map-detail" aria-live="polite">
-            <button class="map-detail__close" id="map-detail-close" aria-label="Close">×</button>
-            <p class="map-detail__eyebrow" id="map-detail-eyebrow">SELECTED MARKET</p>
-            <h3 class="map-detail__title" id="map-detail-title">—</h3>
-            <dl class="map-detail__stats">
-              <dt>Customers</dt>   <dd id="md-customers">—</dd>
-              <dt>Orders</dt>      <dd id="md-orders">—</dd>
-              <dt>Revenue</dt>     <dd id="md-revenue">—</dd>
-              <dt>AOV</dt>         <dd id="md-aov">—</dd>
-              <dt>Rev / Customer</dt><dd id="md-rpc">—</dd>
-            </dl>
-            <p class="map-detail__rank" id="md-rank">—</p>
-          </aside>
-        </section>
-
-        <section class="card card--table col-5">
-          <header class="card__head">
-            <h2 class="card__title">Top Customers</h2>
-            <p class="card__caption">Ranked by lifetime revenue</p>
-          </header>
-          <div class="table-wrap">
-            <table class="data-table" id="table-top-customers">
-              <thead>
-                <tr>
-                  <th>Customer ID</th>
-                  <th>Country</th>
-                  <th class="num">Orders</th>
-                  <th class="num">Revenue</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+          <div class="map-controls">
+            <div class="seg-control" role="radiogroup" aria-label="Map metric">
+              <button class="seg is-active" data-metric="renewables_share_energy" role="radio" aria-checked="true">% Renewables</button>
+              <button class="seg" data-metric="fossil_share_energy" role="radio" aria-checked="false">% Fossil</button>
+              <button class="seg" data-metric="energy_per_capita" role="radio" aria-checked="false">Energy / capita</button>
+              <button class="seg" data-metric="ghg_per_capita" role="radio" aria-checked="false">CO₂e / capita</button>
+            </div>
           </div>
-        </section>
-      </div>
-
-      <section class="card card--chart">
-        <header class="card__head">
-          <h2 class="card__title">Active Customers by Month</h2>
-          <p class="card__caption">Unique customers transacting each month</p>
         </header>
-        <div id="chart-customers-month" class="chart"></div>
+
+        <div class="year-slider">
+          <label for="year-input" class="year-slider__label">Year</label>
+          <input type="range" id="year-input" min="1990" max="2024" value="2023" step="1" />
+          <output for="year-input" id="year-output" class="year-slider__value">2023</output>
+        </div>
+
+        <div id="chart-world-map" class="chart chart--map"></div>
+
+        <button class="map-reset" id="map-reset" aria-label="Reset map view">← Reset</button>
+
+        <aside class="map-detail" id="map-detail" aria-live="polite">
+          <button class="map-detail__close" id="map-detail-close" aria-label="Close">×</button>
+          <p class="map-detail__eyebrow" id="map-detail-eyebrow">SELECTED COUNTRY</p>
+          <h3 class="map-detail__title" id="map-detail-title">—</h3>
+          <dl class="map-detail__stats">
+            <dt>Population</dt>      <dd id="md-population">—</dd>
+            <dt>Primary energy</dt>  <dd id="md-energy">—</dd>
+            <dt>% Renewables</dt>    <dd id="md-renew">—</dd>
+            <dt>% Fossil</dt>        <dd id="md-fossil">—</dd>
+            <dt>% Nuclear</dt>       <dd id="md-nuclear">—</dd>
+            <dt>CO₂e emissions</dt>  <dd id="md-ghg">—</dd>
+          </dl>
+          <p class="map-detail__rank" id="md-rank">—</p>
+        </aside>
       </section>
     </section>
 
     <!-- ============================================================== -->
-    <!-- Panel 4 · Insights                                              -->
+    <!-- Panel 2 · Country Rankings                                      -->
     <!-- ============================================================== -->
-    <section id="panel-insights" class="panel" role="tabpanel">
+    <section id="panel-rankings" class="panel" role="tabpanel">
 
-      <div class="callout">
-        <p class="callout__eyebrow">What this tab adds</p>
-        <p class="callout__text">
-          Deeper signals the headline report glosses over — where orders fail,
-          and which products travel together in the same basket.
-        </p>
+      <div class="year-slider year-slider--card">
+        <label for="year-input-rank" class="year-slider__label">Year</label>
+        <input type="range" id="year-input-rank" min="1990" max="2024" value="2023" step="1" />
+        <output for="year-input-rank" id="year-output-rank" class="year-slider__value">2023</output>
       </div>
 
       <div class="row row--split">
         <section class="card card--chart col-6">
           <header class="card__head">
-            <h2 class="card__title">Cancellation Rate by Category</h2>
-            <p class="card__caption">Share of units cancelled after purchase, by product family</p>
+            <h2 class="card__title">Top 15 · Renewables Share</h2>
+            <p class="card__caption">Countries with the highest share of renewables in primary energy</p>
           </header>
-          <div id="chart-cancel-category" class="chart"></div>
+          <div id="chart-rank-renewables" class="chart"></div>
         </section>
 
         <section class="card card--chart col-6">
           <header class="card__head">
-            <h2 class="card__title">Cancellation Trend</h2>
-            <p class="card__caption">Monthly cancellation rate across the year</p>
+            <h2 class="card__title">Wealth vs Renewables</h2>
+            <p class="card__caption">GDP per capita against renewables share · bubble size = population</p>
           </header>
-          <div id="chart-cancel-month" class="chart"></div>
+          <div id="chart-scatter" class="chart"></div>
         </section>
       </div>
+    </section>
 
-      <section class="card">
-        <header class="card__head">
-          <h2 class="card__title">Product Affinity <span class="card__hint">market-basket analysis</span></h2>
-          <p class="card__caption">Top 20 product pairs appearing together on the same invoice</p>
-        </header>
-        <div id="pair-list" class="pair-list"></div>
-      </section>
+    <!-- ============================================================== -->
+    <!-- Panel 3 · Portugal in Focus                                     -->
+    <!-- ============================================================== -->
+    <section id="panel-portugal" class="panel" role="tabpanel">
+
+      <div class="row row--split">
+        <section class="card card--chart col-6">
+          <header class="card__head">
+            <h2 class="card__title">Then &amp; Now <span class="card__hint">1990 → 2024</span></h2>
+            <p class="card__caption">Slope of change for the headline indicators</p>
+          </header>
+          <div id="chart-pt-slope" class="chart"></div>
+        </section>
+
+        <section class="card card--chart col-6">
+          <header class="card__head">
+            <h2 class="card__title">Portugal vs European Peers</h2>
+            <p class="card__caption">Renewables share · 2024 · neighbouring economies</p>
+          </header>
+          <div id="chart-pt-vs-eu" class="chart"></div>
+        </section>
+      </div>
     </section>
 
     <!-- ============================================================== -->
     <!-- Footer                                                          -->
     <!-- ============================================================== -->
     <footer class="colophon">
-      <span>Data: UCI Machine Learning Repository · Online Retail</span>
+      <span>Data: Our World in Data · Energy dataset</span>
       <span class="colophon__sep">·</span>
       <span>Built with D3.js v7</span>
     </footer>
