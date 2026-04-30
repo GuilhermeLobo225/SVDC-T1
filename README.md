@@ -46,20 +46,21 @@ Para preparar os dados para visualização (neste caso, usando d3.js), foram apl
 
 Abaixo apresentam-se as visualizações interativas desenvolvidas em D3.js, divididas em três abas de análise distintas:
 
-### 1. [Nome da 1ª Aba - Ex: Visão Global / Evolução Temporal]
+### 1. [Aba1-Global Overview]
 *(Breve frase a explicar o que o gráfico mostra, ex: Evolução do consumo de energias renováveis vs fósseis desde 1990).*
 
-![Captura de ecrã da Aba 1](caminho/para/a/tua/imagem1.png)
+![Captura de ecrã da Aba 1](Aba1Total.png)
+![Captura de ecrã do mapa](mapaInterativo.png)
 
-### 2. [Nome da 2ª Aba - Ex: Comparação Económica]
+### 2. [Aba2-Country Rankings]
 *(Breve frase a explicar o que o gráfico mostra, ex: Relação entre o PIB per capita e a pegada de carbono por país).*
 
-![Captura de ecrã da Aba 2](caminho/para/a/tua/imagem2.png)
+![Captura de ecrã da Aba 2](Aba2Total.png)
 
-### 3. [Nome da 3ª Aba - Ex: Foco num País / Independência Energética]
+### 3. [Aba3-Portugal in Focus]
 *(Breve frase a explicar o que o gráfico mostra, ex: Análise detalhada do panorama energético de Portugal).*
 
-![Captura de ecrã da Aba 3](caminho/para/a/tua/imagem3.png)
+![Captura de ecrã da Aba 3](Aba3Total.png)
 
 
 

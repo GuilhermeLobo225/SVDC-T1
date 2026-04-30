@@ -239,7 +239,7 @@
          border:1px solid rgba(201,168,106,0.3);border-radius:8px;
          margin-bottom:1rem;color:#EEEAE0">
          <strong>Could not load CSV data.</strong>
-         Make sure países_limpos.csv and regiões_limpas.csv are in the
+         Make sure cleaned_countries.csv and cleaned_regions.csv are in the
          <code>data/</code> folder, and serve the project over HTTP
          (e.g. <code>python -m http.server</code>).</div>`
       );
