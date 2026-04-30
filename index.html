@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Online Retail · Sales Analytics</title>
+
+  <!-- Typography: Fraunces (display serif) + IBM Plex Sans / Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- D3 v7 + d3-geo-projection + topojson-client -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-geo-projection@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+</head>
+<body>
+  <div class="page">
+
+    <!-- ============================================================== -->
+    <!-- Header                                                          -->
+    <!-- ============================================================== -->
+    <header class="masthead">
+      <div class="masthead__brand">
+        <div class="mark" aria-hidden="true"></div>
+        <div>
+          <p class="eyebrow">UCI · Online Retail</p>
+          <h1 class="title">Sales Intelligence Report</h1>
+        </div>
+      </div>
+      <div class="masthead__meta">
+        <p class="meta-line">
+          <span id="meta-period">—</span>
+          <span class="meta-sep">·</span>
+          <span id="meta-rows">—</span>&nbsp;transactions
+        </p>
+      </div>
+    </header>
+
+    <!-- ============================================================== -->
+    <!-- Tabs                                                            -->
+    <!-- ============================================================== -->
+    <nav class="tabs" role="tablist" aria-label="Report sections">
+      <button class="tab is-active" role="tab" data-panel="summary"
+              aria-selected="true" aria-controls="panel-summary">
+        <span class="tab__num">01</span>
+        <span class="tab__label">Executive Summary</span>
+      </button>
+      <button class="tab" role="tab" data-panel="product"
+              aria-selected="false" aria-controls="panel-product">
+        <span class="tab__num">02</span>
+        <span class="tab__label">Product Performance</span>
+      </button>
+      <button class="tab" role="tab" data-panel="customer"
+              aria-selected="false" aria-controls="panel-customer">
+        <span class="tab__num">03</span>
+        <span class="tab__label">Customer Analysis</span>
+      </button>
+      <button class="tab" role="tab" data-panel="insights"
+              aria-selected="false" aria-controls="panel-insights">
+        <span class="tab__num">04</span>
+        <span class="tab__label">Insights</span>
+      </button>
+      <div class="tabs__rail"><div class="tabs__indicator" id="tabs-indicator"></div></div>
+    </nav>
+
+    <!-- ============================================================== -->
+    <!-- Panel 1 · Executive Summary                                     -->
+    <!-- ============================================================== -->
+    <section id="panel-summary" class="panel is-active" role="tabpanel">
+
+      <div class="kpi-grid">
+        <article class="kpi" data-kpi="totalRevenue">
+          <p class="kpi__label">Total Revenue</p>
+          <p class="kpi__value">—</p>
+          <p class="kpi__sub">Across all markets</p>
+        </article>
+        <article class="kpi" data-kpi="avgOrderValue">
+          <p class="kpi__label">Average Order Value</p>
+          <p class="kpi__value">—</p>
+          <p class="kpi__sub">Per invoice</p>
+        </article>
+        <article class="kpi" data-kpi="totalCustomers">
+          <p class="kpi__label">Total Customers</p>
+          <p class="kpi__value">—</p>
+          <p class="kpi__sub">Unique identifiers</p>
+        </article>
+        <article class="kpi" data-kpi="totalOrders">
+          <p class="kpi__label">Total Orders</p>
+          <p class="kpi__value">—</p>
+          <p class="kpi__sub">Distinct invoices</p>
+        </article>
+      </div>
+
+      <div class="row row--split">
+        <section class="card card--chart col-8">
+          <header class="card__head">
+            <h2 class="card__title">Revenue by Month</h2>
+            <p class="card__caption">Monthly sales trajectory across the reporting period</p>
+          </header>
+          <div id="chart-revenue-month" class="chart"></div>
+        </section>
+
+        <section class="card card--chart col-4">
+          <header class="card__head">
+            <h2 class="card__title">Revenue by Quarter</h2>
+            <p class="card__caption">Share of total annual revenue</p>
+          </header>
+          <div id="chart-revenue-quarter" class="chart chart--donut"></div>
+        </section>
+      </div>
+
+      <section class="card card--chart">
+        <header class="card__head">
+          <h2 class="card__title">Revenue by Country <span class="card__hint">excluding United Kingdom</span></h2>
+          <p class="card__caption">International markets ranked by total revenue contribution</p>
+        </header>
+        <div id="chart-revenue-country" class="chart"></div>
+      </section>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Panel 2 · Product Performance                                   -->
+    <!-- ============================================================== -->
+    <section id="panel-product" class="panel" role="tabpanel">
+
+      <div class="row row--split">
+        <section class="card card--chart col-7">
+          <header class="card__head">
+            <h2 class="card__title">Revenue by Category</h2>
+            <p class="card__caption">Categories derived from product description keywords · click a cell to focus</p>
+          </header>
+          <div id="chart-category-treemap" class="chart chart--treemap"></div>
+        </section>
+
+        <section class="card card--table col-5">
+          <header class="card__head">
+            <h2 class="card__title">Top Products</h2>
+            <p class="card__caption">Ranked by revenue contribution</p>
+          </header>
+          <div class="table-wrap">
+            <table class="data-table" id="table-top-products">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th class="num">Units Sold</th>
+                  <th class="num">Revenue</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="card card--chart">
+        <header class="card__head">
+          <h2 class="card__title">Top Products by Units Sold</h2>
+          <p class="card__caption">Highest-volume items across all transactions</p>
+        </header>
+        <div id="chart-units-description" class="chart"></div>
+      </section>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Panel 3 · Customer Analysis                                     -->
+    <!-- ============================================================== -->
+    <section id="panel-customer" class="panel" role="tabpanel">
+
+      <div class="row row--split">
+        <section class="card card--chart col-7" id="map-card">
+          <header class="card__head">
+            <h2 class="card__title">Customers by Country <span class="card__hint">excluding United Kingdom</span></h2>
+            <p class="card__caption">Click a bubble or country to zoom in and reveal local statistics</p>
+          </header>
+          <div id="chart-customer-map" class="chart chart--map"></div>
+
+          <button class="map-reset" id="map-reset" aria-label="Reset map view">← Reset</button>
+
+          <aside class="map-detail" id="map-detail" aria-live="polite">
+            <button class="map-detail__close" id="map-detail-close" aria-label="Close">×</button>
+            <p class="map-detail__eyebrow" id="map-detail-eyebrow">SELECTED MARKET</p>
+            <h3 class="map-detail__title" id="map-detail-title">—</h3>
+            <dl class="map-detail__stats">
+              <dt>Customers</dt>   <dd id="md-customers">—</dd>
+              <dt>Orders</dt>      <dd id="md-orders">—</dd>
+              <dt>Revenue</dt>     <dd id="md-revenue">—</dd>
+              <dt>AOV</dt>         <dd id="md-aov">—</dd>
+              <dt>Rev / Customer</dt><dd id="md-rpc">—</dd>
+            </dl>
+            <p class="map-detail__rank" id="md-rank">—</p>
+          </aside>
+        </section>
+
+        <section class="card card--table col-5">
+          <header class="card__head">
+            <h2 class="card__title">Top Customers</h2>
+            <p class="card__caption">Ranked by lifetime revenue</p>
+          </header>
+          <div class="table-wrap">
+            <table class="data-table" id="table-top-customers">
+              <thead>
+                <tr>
+                  <th>Customer ID</th>
+                  <th>Country</th>
+                  <th class="num">Orders</th>
+                  <th class="num">Revenue</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="card card--chart">
+        <header class="card__head">
+          <h2 class="card__title">Active Customers by Month</h2>
+          <p class="card__caption">Unique customers transacting each month</p>
+        </header>
+        <div id="chart-customers-month" class="chart"></div>
+      </section>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Panel 4 · Insights                                              -->
+    <!-- ============================================================== -->
+    <section id="panel-insights" class="panel" role="tabpanel">
+
+      <div class="callout">
+        <p class="callout__eyebrow">What this tab adds</p>
+        <p class="callout__text">
+          Deeper signals the headline report glosses over — where orders fail,
+          and which products travel together in the same basket.
+        </p>
+      </div>
+
+      <div class="row row--split">
+        <section class="card card--chart col-6">
+          <header class="card__head">
+            <h2 class="card__title">Cancellation Rate by Category</h2>
+            <p class="card__caption">Share of units cancelled after purchase, by product family</p>
+          </header>
+          <div id="chart-cancel-category" class="chart"></div>
+        </section>
+
+        <section class="card card--chart col-6">
+          <header class="card__head">
+            <h2 class="card__title">Cancellation Trend</h2>
+            <p class="card__caption">Monthly cancellation rate across the year</p>
+          </header>
+          <div id="chart-cancel-month" class="chart"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <header class="card__head">
+          <h2 class="card__title">Product Affinity <span class="card__hint">market-basket analysis</span></h2>
+          <p class="card__caption">Top 20 product pairs appearing together on the same invoice</p>
+        </header>
+        <div id="pair-list" class="pair-list"></div>
+      </section>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- Footer                                                          -->
+    <!-- ============================================================== -->
+    <footer class="colophon">
+      <span>Data: UCI Machine Learning Repository · Online Retail</span>
+      <span class="colophon__sep">·</span>
+      <span>Built with D3.js v7</span>
+    </footer>
+  </div>
+
+  <!-- Tooltip (single, reused across all charts) -->
+  <div id="tooltip" class="tooltip" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
